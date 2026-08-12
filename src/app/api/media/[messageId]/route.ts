@@ -1,8 +1,10 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { z } from "zod";
 import { authorizeRequest } from "@/lib/auth/api";
+import { createSupabaseAdminClient } from "@/lib/supabase/admin";
 import { getAccountWithSecrets } from "@/lib/whatsapp/accounts";
 import { downloadMedia, resolveMediaUrl } from "@/lib/whatsapp/client";
+import { MEDIA_BUCKET } from "@/lib/whatsapp/media";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -29,11 +31,36 @@ export async function GET(
   // Consulta pelo cliente da sessão: se a conversa não é do usuário, some.
   const { data: message } = await auth.supabase
     .from("messages")
-    .select("id, media_id, media_mime_type, media_filename, whatsapp_account_id")
+    .select("id, media_id, media_url, media_mime_type, media_filename, whatsapp_account_id")
     .eq("id", messageId)
     .maybeSingle();
 
-  if (!message?.media_id) {
+  if (!message) {
+    return NextResponse.json({ error: "not_found" }, { status: 404 });
+  }
+
+  // Mídia enviada pelo CRM: o arquivo é nosso, está no Storage privado.
+  // Serve daqui em vez de pedir à Meta, cuja cópia expira.
+  if (message.media_url) {
+    const { data: blob, error } = await createSupabaseAdminClient()
+      .storage.from(MEDIA_BUCKET)
+      .download(message.media_url);
+
+    if (error || !blob) {
+      return NextResponse.json({ error: "media_unavailable" }, { status: 404 });
+    }
+
+    return new NextResponse(blob.stream(), {
+      status: 200,
+      headers: mediaHeaders(
+        message.media_mime_type ?? blob.type ?? "application/octet-stream",
+        message.media_filename,
+      ),
+    });
+  }
+
+  // Mídia recebida do cliente: só existe na Meta, buscada com o token.
+  if (!message.media_id) {
     return NextResponse.json({ error: "not_found" }, { status: 404 });
   }
 
@@ -56,13 +83,17 @@ export async function GET(
 
   return new NextResponse(upstream.body, {
     status: 200,
-    headers: {
-      "Content-Type": contentType,
-      // Privado: a mídia é de um cliente, não pode ficar em cache compartilhado.
-      "Cache-Control": "private, max-age=300",
-      ...(message.media_filename
-        ? { "Content-Disposition": `inline; filename="${encodeURIComponent(message.media_filename)}"` }
-        : {}),
-    },
+    headers: mediaHeaders(contentType, message.media_filename),
   });
+}
+
+function mediaHeaders(contentType: string, filename: string | null): HeadersInit {
+  return {
+    "Content-Type": contentType,
+    // Privado: a mídia é de um cliente, não pode ficar em cache compartilhado.
+    "Cache-Control": "private, max-age=300",
+    ...(filename
+      ? { "Content-Disposition": `inline; filename="${encodeURIComponent(filename)}"` }
+      : {}),
+  };
 }

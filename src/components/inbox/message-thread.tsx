@@ -159,6 +159,7 @@ export function MessageThread({
       <Composer
         conversation={conversation}
         isAdmin={isAdmin}
+        users={users}
         onSent={(message) => setMessages((prev) => [...prev, message])}
       />
     </section>

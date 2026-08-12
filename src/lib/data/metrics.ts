@@ -1,4 +1,5 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
+import { APP_TIME_ZONE, addDaysInAppTz, dayKeyInAppTz, hourInAppTz, startOfDayInAppTz } from "@/lib/time";
 import type { Database, MetricsSummaryRow, MetricsVolumeRow } from "@/lib/types/database";
 
 type Client = SupabaseClient<Database>;
@@ -18,15 +19,28 @@ export const PERIOD_OPTIONS: { key: PeriodKey; label: string }[] = [
   { key: "30d", label: "30 dias" },
 ];
 
-function startOfDay(date: Date): Date {
-  const copy = new Date(date);
-  copy.setHours(0, 0, 0, 0);
-  return copy;
+/**
+ * `de`/`ate` chegam como "2026-03-01". `new Date()` interpretaria isso como
+ * meia-noite UTC, que é 21h do dia anterior em São Paulo — deslocando o
+ * período inteiro em um dia. Por isso a data é montada ao meio-dia e depois
+ * truncada no fuso da operação.
+ */
+function parseDateInput(value: string): Date | null {
+  const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(value.trim());
+  if (!match) return null;
+
+  const [, year, month, day] = match;
+  const midday = new Date(Date.UTC(Number(year), Number(month) - 1, Number(day), 12));
+
+  return Number.isNaN(midday.getTime()) ? null : startOfDayInAppTz(midday);
 }
 
 /**
  * Resolve o período a partir da URL. Aceita atalhos e intervalo personalizado
  * (`de`/`ate`); qualquer coisa inválida cai em "hoje" em vez de quebrar a tela.
+ *
+ * Os recortes de dia usam o fuso da operação, não o do servidor: "hoje" tem
+ * que começar à meia-noite em Brasília, e não às 21h do dia anterior.
  */
 export function resolvePeriod(params: {
   periodo?: string;
@@ -36,30 +50,29 @@ export function resolvePeriod(params: {
   const now = new Date();
 
   if (params.de) {
-    const from = new Date(params.de);
-    const to = params.ate ? new Date(params.ate) : now;
+    const from = parseDateInput(params.de);
+    const toDay = params.ate ? parseDateInput(params.ate) : startOfDayInAppTz(now);
 
-    if (!Number.isNaN(from.getTime()) && !Number.isNaN(to.getTime()) && from <= to) {
-      // O fim do intervalo é exclusivo; inclui o dia inteiro escolhido.
-      const inclusiveTo = startOfDay(to);
-      inclusiveTo.setDate(inclusiveTo.getDate() + 1);
-      return { key: "custom", label: "Personalizado", from: startOfDay(from), to: inclusiveTo };
+    if (from && toDay && from <= toDay) {
+      // O fim é exclusivo, então avança um dia para incluir o dia escolhido.
+      return {
+        key: "custom",
+        label: "Personalizado",
+        from,
+        to: addDaysInAppTz(toDay, 1),
+      };
     }
   }
 
+  const today = startOfDayInAppTz(now);
+
   switch (params.periodo) {
-    case "7d": {
-      const from = startOfDay(now);
-      from.setDate(from.getDate() - 6);
-      return { key: "7d", label: "7 dias", from, to: now };
-    }
-    case "30d": {
-      const from = startOfDay(now);
-      from.setDate(from.getDate() - 29);
-      return { key: "30d", label: "30 dias", from, to: now };
-    }
+    case "7d":
+      return { key: "7d", label: "7 dias", from: addDaysInAppTz(today, -6), to: now };
+    case "30d":
+      return { key: "30d", label: "30 dias", from: addDaysInAppTz(today, -29), to: now };
     default:
-      return { key: "hoje", label: "Hoje", from: startOfDay(now), to: now };
+      return { key: "hoje", label: "Hoje", from: today, to: now };
   }
 }
 
@@ -109,6 +122,11 @@ export async function fetchTeamMetrics(
   return data ?? [];
 }
 
+export function bucketOf(period: Period): "hour" | "day" {
+  // "Hoje" pede visão por hora; períodos longos, por dia.
+  return period.key === "hoje" ? "hour" : "day";
+}
+
 export async function fetchVolume(
   supabase: Client,
   userId: string | null,
@@ -118,10 +136,79 @@ export async function fetchVolume(
     p_user_id: userId,
     p_from: period.from.toISOString(),
     p_to: period.to.toISOString(),
-    // "Hoje" pede visão por hora; períodos longos, por dia.
-    p_bucket: period.key === "hoje" ? "hour" : "day",
+    p_bucket: bucketOf(period),
+    // Sem isto o agrupamento sairia por hora UTC: o pico das 16h da operação
+    // apareceria às 19h no gráfico.
+    p_timezone: APP_TIME_ZONE,
   });
 
   if (error) throw new Error(`Falha ao carregar volume: ${error.message}`);
   return data ?? [];
+}
+
+export interface VolumeBucket {
+  key: string;
+  label: string;
+  sent: number;
+  received: number;
+}
+
+/**
+ * Completa as lacunas do gráfico.
+ *
+ * O banco só devolve períodos com atividade. Sem preencher os vazios, uma hora
+ * sem mensagem simplesmente desapareceria e o eixo ficaria mentindo sobre a
+ * distribuição do dia.
+ */
+export function fillVolumeBuckets(rows: MetricsVolumeRow[], period: Period): VolumeBucket[] {
+  const bucket = bucketOf(period);
+
+  const totals = new Map<string, { sent: number; received: number }>();
+  for (const row of rows) {
+    const date = new Date(row.bucket);
+    if (Number.isNaN(date.getTime())) continue;
+
+    const key =
+      bucket === "hour"
+        ? `${dayKeyInAppTz(date)}T${String(hourInAppTz(date)).padStart(2, "0")}`
+        : dayKeyInAppTz(date);
+
+    totals.set(key, { sent: Number(row.sent) || 0, received: Number(row.received) || 0 });
+  }
+
+  const buckets: VolumeBucket[] = [];
+
+  if (bucket === "hour") {
+    const day = dayKeyInAppTz(period.from);
+    for (let hour = 0; hour < 24; hour++) {
+      const key = `${day}T${String(hour).padStart(2, "0")}`;
+      const value = totals.get(key);
+      buckets.push({
+        key,
+        label: `${String(hour).padStart(2, "0")}h`,
+        sent: value?.sent ?? 0,
+        received: value?.received ?? 0,
+      });
+    }
+    return buckets;
+  }
+
+  let cursor = startOfDayInAppTz(period.from);
+  // Guarda contra intervalos absurdos vindos da URL.
+  for (let i = 0; i < 400 && cursor < period.to; i++) {
+    const key = dayKeyInAppTz(cursor);
+    const value = totals.get(key);
+    const [, month, day] = key.split("-");
+
+    buckets.push({
+      key,
+      label: `${day}/${month}`,
+      sent: value?.sent ?? 0,
+      received: value?.received ?? 0,
+    });
+
+    cursor = addDaysInAppTz(cursor, 1);
+  }
+
+  return buckets;
 }

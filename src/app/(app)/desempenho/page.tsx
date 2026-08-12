@@ -3,8 +3,16 @@ import { PageHeader } from "@/components/layout/page-header";
 import { PeriodTabs } from "@/components/metrics/period-tabs";
 import { Stat } from "@/components/metrics/stat";
 import { TeamRanking } from "@/components/metrics/team-ranking";
+import { VolumeChart } from "@/components/metrics/volume-chart";
 import { requireProfile } from "@/lib/auth/session";
-import { fetchTeamMetrics, fetchUserMetrics, resolvePeriod } from "@/lib/data/metrics";
+import {
+  bucketOf,
+  fetchTeamMetrics,
+  fetchUserMetrics,
+  fetchVolume,
+  fillVolumeBuckets,
+  resolvePeriod,
+} from "@/lib/data/metrics";
 import { formatTime } from "@/lib/format";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 
@@ -21,10 +29,15 @@ export default async function PerformancePage({
   const period = resolvePeriod(await searchParams);
   const isAdmin = profile.role === "admin";
 
-  const [mine, team] = await Promise.all([
+  const [mine, team, volume] = await Promise.all([
     fetchUserMetrics(supabase, profile.id, profile.full_name, period),
     isAdmin ? fetchTeamMetrics(supabase, period) : Promise.resolve([]),
+    // Admin vê o volume da operação inteira; consignador, o próprio.
+    fetchVolume(supabase, isAdmin ? null : profile.id, period),
   ]);
+
+  const buckets = fillVolumeBuckets(volume, period);
+  const granularity = bucketOf(period);
 
   return (
     <>
@@ -72,6 +85,14 @@ export default async function PerformancePage({
                 Em negociação: <span className="text-foreground">{mine.negotiating_count}</span>
               </span>
             </div>
+          </section>
+
+          <section className="space-y-3">
+            <h2 className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+              {isAdmin ? "Volume da operação" : "Seu volume"} ·{" "}
+              {granularity === "hour" ? "por horário" : "por dia"}
+            </h2>
+            <VolumeChart buckets={buckets} granularity={granularity} />
           </section>
 
           {isAdmin ? (

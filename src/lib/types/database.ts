@@ -352,6 +352,7 @@ export interface Database {
           p_from?: string;
           p_to?: string;
           p_bucket?: "hour" | "day";
+          p_timezone?: string;
         };
         Returns: MetricsVolumeRow[];
       };

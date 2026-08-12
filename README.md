@@ -88,13 +88,36 @@ externa: se a Meta aceitar e o processo cair em seguida, a mensagem não some do
 histórico. O `clientRef` gerado no navegador garante que duplo clique ou retry
 não vire duas mensagens para o cliente.
 
+### Envio de mídia
+
+O arquivo **não** passa pela rota de API: funções serverless na Vercel aceitam
+poucos megabytes por requisição, e foto de celular passa disso. O backend
+confere a permissão e emite uma URL assinada; o navegador sobe direto para o
+Storage; a Meta busca o arquivo por um link temporário de 10 minutos.
+
+A cópia fica no bucket privado, então o histórico continua legível depois que a
+mídia expira do lado da Meta. Tipo e tamanho são validados antes do upload,
+com os mesmos limites da Cloud API.
+
 ### Regras da Meta são respeitadas, não contornadas
 
-Fora da janela de 24 horas o envio é **bloqueado** com explicação na interface,
-em vez de tentar qualquer truque. Não há automação de WhatsApp Web em lugar
-nenhum — apenas a Cloud API oficial. A arquitetura está preparada para
-coexistência (WhatsApp Business App + Cloud API no mesmo número) através do
-modo oficial da Meta.
+Fora da janela de 24 horas o envio comum é **bloqueado** com explicação na
+interface. O único caminho oferecido é o oficial: enviar um template aprovado,
+escolhido de uma lista que vem da própria Meta — só aparece o que já passou
+por aprovação. Não há automação de WhatsApp Web em lugar nenhum. A arquitetura
+está preparada para coexistência (WhatsApp Business App + Cloud API no mesmo
+número) através do modo oficial da Meta.
+
+### Fuso horário
+
+A Vercel roda em UTC e o consignador está em Brasília. Se cada camada usasse o
+fuso do próprio ambiente, o mesmo instante apareceria de três formas: horário
+errado na tela, "Hoje" começando às 21h do dia anterior nas métricas e
+divergência de hidratação em todo timestamp renderizado no servidor.
+
+Por isso toda conversão entre instante e "dia/hora" passa por `lib/time.ts`,
+com fuso fixo — inclusive o agrupamento por hora do gráfico de volume, feito no
+banco com `at time zone`. O banco continua guardando tudo em UTC.
 
 ---
 
@@ -145,9 +168,10 @@ npm run build
 ```
 
 Os testes cobrem a lógica que quebra silenciosamente em produção: normalização
-de telefone brasileiro (o nono dígito que a Meta às vezes omite), verificação
-de assinatura, parsing de webhook, ordenação de status, avanço de funil,
-períodos de métrica e rate limit.
+de telefone brasileiro (o nono dígito que a Meta às vezes omite), conversão de
+fuso, verificação de assinatura, parsing de webhook, ordenação de status,
+avanço de funil, períodos e buckets de métrica, validação de mídia, variáveis
+de template e rate limit.
 
 ---
 
@@ -192,6 +216,11 @@ interface da função.
 
 **Tema escuro apenas.** Os tokens de cor estão isolados em `globals.css`;
 adicionar tema claro é redefinir variáveis, sem tocar em componente.
+
+**Gráfico sem biblioteca.** O volume por horário é barra em CSS puro. A
+pergunta que ele responde — em que horário a equipe trabalha e onde estão os
+buracos — se resolve com altura relativa; eixo, grade e tooltip só somariam
+ruído e peso ao bundle.
 
 ---
 

@@ -4,7 +4,8 @@ import { authorizeRequest } from "@/lib/auth/api";
 import { nextStatusAfterOutbound } from "@/lib/domain/lead";
 import { rateLimit } from "@/lib/rate-limit";
 import { createSupabaseAdminClient } from "@/lib/supabase/admin";
-import { sendTextMessage } from "@/lib/whatsapp/client";
+import { sendMediaMessage } from "@/lib/whatsapp/client";
+import { MEDIA_BUCKET, validateMedia } from "@/lib/whatsapp/media";
 import { authorizeConversationSend } from "@/lib/whatsapp/send-guard";
 
 export const runtime = "nodejs";
@@ -12,20 +13,22 @@ export const dynamic = "force-dynamic";
 
 const bodySchema = z.object({
   conversationId: z.string().uuid(),
-  text: z.string().trim().min(1, "Mensagem vazia").max(4096, "Mensagem muito longa"),
-  /** Gerado no navegador antes do POST: garante idempotência em retry/duplo clique. */
+  path: z.string().trim().min(1).max(400),
+  mimeType: z.string().trim().min(3).max(120),
+  filename: z.string().trim().min(1).max(255),
+  caption: z.string().trim().max(1024).optional(),
   clientRef: z.string().uuid(),
 });
 
-const SEND_LIMIT = 30;
-const SEND_WINDOW_MS = 60_000;
+/** Tempo de vida do link que a Meta usa para buscar o arquivo. */
+const SIGNED_URL_TTL_SECONDS = 600;
 
 /**
- * Envio de mensagem de texto pelo CRM.
+ * Envia uma mídia já presente no Storage.
  *
- * O navegador nunca fala com a Meta: ele chama esta rota, que valida
- * permissão, registra a tentativa, envia e só então guarda o
- * provider_message_id. Os status finais chegam depois, por webhook.
+ * A Meta baixa o arquivo por uma URL assinada de vida curta — nunca uma URL
+ * pública. O caminho no bucket fica em `media_url`, então o histórico continua
+ * legível mesmo depois que a cópia da Meta expirar.
  */
 export async function POST(request: NextRequest) {
   const auth = await authorizeRequest();
@@ -33,7 +36,7 @@ export async function POST(request: NextRequest) {
 
   const { actor, supabase } = auth;
 
-  const limit = rateLimit(`send:${actor.id}`, SEND_LIMIT, SEND_WINDOW_MS);
+  const limit = rateLimit(`send:${actor.id}`, 30, 60_000);
   if (!limit.allowed) {
     return NextResponse.json(
       { error: "rate_limited", message: "Muitas mensagens em pouco tempo. Aguarde um instante." },
@@ -43,21 +46,29 @@ export async function POST(request: NextRequest) {
 
   const parsed = bodySchema.safeParse(await request.json().catch(() => null));
   if (!parsed.success) {
-    return NextResponse.json(
-      { error: "invalid_body", issues: parsed.error.issues.map((i) => i.message) },
-      { status: 400 },
-    );
+    return NextResponse.json({ error: "invalid_body" }, { status: 400 });
   }
 
-  const { conversationId, text, clientRef } = parsed.data;
+  const { conversationId, path, mimeType, filename, caption, clientRef } = parsed.data;
+
+  const validation = validateMedia(mimeType, 1);
+  if (!validation.ok || !validation.kind || !validation.messageType) {
+    return NextResponse.json({ error: "invalid_media", message: validation.error }, { status: 422 });
+  }
 
   const guard = await authorizeConversationSend(supabase, actor, conversationId);
   if (!guard.ok) return guard.response;
 
   const { contactPhone, contactStatus, contactId, account } = guard.context;
+
+  // O caminho vem do cliente; amarrá-lo à conversa impede que alguém envie um
+  // arquivo de outra conversa apenas trocando o valor no corpo da requisição.
+  if (!path.startsWith(`outbound/${conversationId}/`)) {
+    return NextResponse.json({ error: "invalid_path" }, { status: 422 });
+  }
+
   const admin = createSupabaseAdminClient();
 
-  // Idempotência: se o mesmo clientRef já foi gravado, devolve o que existe.
   const { data: existing } = await admin
     .from("messages")
     .select("id, status, provider_message_id")
@@ -68,8 +79,17 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ message: existing, deduplicated: true }, { status: 200 });
   }
 
-  // A tentativa é registrada ANTES da chamada externa: se a Meta responder e o
-  // processo cair em seguida, a mensagem não some do histórico.
+  const { data: signed, error: signError } = await admin.storage
+    .from(MEDIA_BUCKET)
+    .createSignedUrl(path, SIGNED_URL_TTL_SECONDS);
+
+  if (signError || !signed?.signedUrl) {
+    return NextResponse.json(
+      { error: "media_not_found", message: "Arquivo não encontrado no armazenamento." },
+      { status: 404 },
+    );
+  }
+
   const { data: message, error: insertError } = await admin
     .from("messages")
     .insert({
@@ -77,8 +97,11 @@ export async function POST(request: NextRequest) {
       whatsapp_account_id: account.account.id,
       contact_id: contactId,
       direction: "outbound",
-      message_type: "text",
-      content: text,
+      message_type: validation.messageType,
+      content: caption ?? null,
+      media_url: path,
+      media_mime_type: mimeType,
+      media_filename: filename,
       sent_by_user_id: actor.id,
       status: "queued",
       client_ref: clientRef,
@@ -90,7 +113,13 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: "message_insert_failed" }, { status: 500 });
   }
 
-  const result = await sendTextMessage(account.credentials, contactPhone, text);
+  const result = await sendMediaMessage(
+    account.credentials,
+    contactPhone,
+    validation.kind,
+    signed.signedUrl,
+    { caption, filename },
+  );
 
   const { data: updated } = await admin
     .from("messages")
@@ -113,7 +142,6 @@ export async function POST(request: NextRequest) {
     );
   }
 
-  // Primeira abordagem move o lead de "novo" para "contatado".
   const advanced = nextStatusAfterOutbound(contactStatus);
   if (advanced) {
     await admin.from("contacts").update({ status: advanced }).eq("id", contactId);

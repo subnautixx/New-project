@@ -2,6 +2,7 @@ import "server-only";
 
 import { serverEnv } from "@/lib/env";
 import { toWhatsappRecipient } from "@/lib/phone";
+import { countTemplateVariables } from "./template";
 
 const GRAPH_BASE = "https://graph.facebook.com";
 
@@ -93,6 +94,35 @@ export async function sendTemplateMessage(
   });
 }
 
+/**
+ * Envia mídia por link.
+ *
+ * A Meta baixa o arquivo da URL informada — usamos uma URL assinada e de vida
+ * curta do Supabase Storage. Assim o binário nunca atravessa a função
+ * serverless, que na Vercel tem limite de poucos megabytes por requisição.
+ */
+export async function sendMediaMessage(
+  credentials: WhatsappCredentials,
+  toE164: string,
+  kind: "image" | "video" | "audio" | "document",
+  link: string,
+  options: { caption?: string | null; filename?: string | null } = {},
+): Promise<SendResult> {
+  // Áudio não aceita legenda; documento aceita legenda e nome do arquivo.
+  const media: Record<string, unknown> = { link };
+
+  if (options.caption && kind !== "audio") media.caption = options.caption;
+  if (options.filename && kind === "document") media.filename = options.filename;
+
+  return postMessage(credentials, {
+    messaging_product: "whatsapp",
+    recipient_type: "individual",
+    to: toWhatsappRecipient(toE164),
+    type: kind,
+    [kind]: media,
+  });
+}
+
 /** Marca a mensagem como lida no aparelho do cliente (duplo tique azul). */
 export async function markMessageAsRead(
   credentials: WhatsappCredentials,
@@ -141,6 +171,60 @@ async function postMessage(
   const messageId = (body as { messages?: { id?: string }[] } | null)?.messages?.[0]?.id ?? null;
 
   return { ok: true, providerMessageId: messageId, errorCode: null, errorMessage: null };
+}
+
+export interface TemplateComponent {
+  type?: string;
+  text?: string;
+  format?: string;
+}
+
+export interface MessageTemplate {
+  name: string;
+  language: string;
+  category: string | null;
+  bodyText: string | null;
+  variableCount: number;
+}
+
+/** Templates aprovados da conta. Só os aprovados podem ser enviados. */
+export async function listMessageTemplates(
+  credentials: WhatsappCredentials,
+  wabaId: string,
+): Promise<MessageTemplate[]> {
+  const response = await fetch(
+    `${graphUrl(wabaId)}/message_templates?status=APPROVED&limit=100`,
+    {
+      headers: { Authorization: `Bearer ${credentials.accessToken}` },
+      cache: "no-store",
+    },
+  );
+
+  if (!response.ok) return [];
+
+  const body = (await response.json().catch(() => null)) as {
+    data?: {
+      name?: string;
+      language?: string;
+      category?: string;
+      components?: TemplateComponent[];
+    }[];
+  } | null;
+
+  return (body?.data ?? [])
+    .filter((template) => template.name && template.language)
+    .map((template) => {
+      const bodyText =
+        template.components?.find((c) => c.type?.toUpperCase() === "BODY")?.text ?? null;
+
+      return {
+        name: template.name!,
+        language: template.language!,
+        category: template.category ?? null,
+        bodyText,
+        variableCount: countTemplateVariables(bodyText),
+      };
+    });
 }
 
 /**
