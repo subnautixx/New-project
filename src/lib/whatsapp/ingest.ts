@@ -153,27 +153,52 @@ export async function processInboundMessage(
     currentStatus = created.status;
   }
 
-  const { data: conversation, error: convError } = await admin
+  // Busca antes de criar, em vez de upsert: um upsert reescreveria
+  // `assigned_user_id` a cada mensagem recebida e desfaria silenciosamente uma
+  // transferência feita só na conversa.
+  const { data: found } = await admin
     .from("conversations")
-    .upsert(
-      {
+    .select("id")
+    .eq("contact_id", contactId)
+    .eq("whatsapp_account_id", account.id)
+    .maybeSingle();
+
+  let conversationId = found?.id ?? null;
+
+  if (!conversationId) {
+    const { data: created, error: convError } = await admin
+      .from("conversations")
+      .insert({
         contact_id: contactId,
         whatsapp_account_id: account.id,
         assigned_user_id: ownerId,
-      },
-      { onConflict: "contact_id,whatsapp_account_id", ignoreDuplicates: false },
-    )
-    .select("id")
-    .single();
+      })
+      .select("id")
+      .single();
 
-  if (convError || !conversation) {
-    await finishWebhookEvent(admin, event.eventKey, `Falha na conversa: ${convError?.message}`);
-    return { status: "skipped", reason: "conversation_failed" };
+    if (convError || !created) {
+      // Corrida com outra entrega do mesmo webhook: alguém já criou.
+      const { data: raced } = await admin
+        .from("conversations")
+        .select("id")
+        .eq("contact_id", contactId)
+        .eq("whatsapp_account_id", account.id)
+        .maybeSingle();
+
+      if (!raced) {
+        await finishWebhookEvent(admin, event.eventKey, `Falha na conversa: ${convError?.message}`);
+        return { status: "skipped", reason: "conversation_failed" };
+      }
+
+      conversationId = raced.id;
+    } else {
+      conversationId = created.id;
+    }
   }
 
   const { error: messageError } = await admin.from("messages").insert({
     provider_message_id: event.providerMessageId,
-    conversation_id: conversation.id,
+    conversation_id: conversationId,
     whatsapp_account_id: account.id,
     contact_id: contactId,
     direction: "inbound",

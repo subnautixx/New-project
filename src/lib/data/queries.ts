@@ -75,7 +75,9 @@ export async function fetchConversations(
 
   if (filters.unreadOnly) query = query.gt("unread_count", 0);
   if (filters.status && filters.status !== "todos") {
-    query = query.eq("contacts.status", filters.status);
+    // O recurso embutido foi apelidado de `contact`; o filtro precisa usar o
+    // apelido, não o nome da tabela, senão o PostgREST devolve 400.
+    query = query.eq("contact.status", filters.status);
   }
   if (filters.assigneeId && filters.assigneeId !== "todos") {
     query = query.eq("assigned_user_id", filters.assigneeId);
@@ -86,9 +88,9 @@ export async function fetchConversations(
 
   const search = filters.search?.trim();
   if (search) {
-    // `or` sobre a tabela embutida precisa do prefixo referencedTable.
-    query = query.or(`full_name.ilike.%${escapeLike(search)}%,phone_e164.ilike.%${escapeLike(search)}%`, {
-      referencedTable: "contacts",
+    const term = `%${escapeLike(search)}%`;
+    query = query.or(`full_name.ilike.${term},phone_e164.ilike.${term}`, {
+      referencedTable: "contact",
     });
   }
 
