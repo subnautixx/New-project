@@ -6,7 +6,7 @@ import type { ProfileRow } from "@/lib/types/database";
 
 export type SessionProfile = Pick<
   ProfileRow,
-  "id" | "full_name" | "email" | "role" | "is_active"
+  "id" | "full_name" | "email" | "role" | "is_active" | "onboarding_completed_at"
 >;
 
 /** Perfil do usuário logado, ou null. Não redireciona. */
@@ -21,7 +21,7 @@ export async function getSessionProfile(): Promise<SessionProfile | null> {
 
   const { data: profile } = await supabase
     .from("profiles")
-    .select("id, full_name, email, role, is_active")
+    .select("id, full_name, email, role, is_active, onboarding_completed_at")
     .eq("id", user.id)
     .maybeSingle();
 

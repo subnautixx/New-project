@@ -2,6 +2,7 @@
 
 import {
   BarChart3,
+  HelpCircle,
   LogOut,
   MessageSquare,
   Phone,
@@ -11,6 +12,8 @@ import {
 } from "lucide-react";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
+import { useState } from "react";
+import { OnboardingTour } from "@/components/onboarding/onboarding-tour";
 import { Logo } from "@/components/brand/logo";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { Button } from "@/components/ui/button";
@@ -35,6 +38,9 @@ const NAV: NavItem[] = [
 ];
 
 export function AppSidebar({ profile }: { profile: SessionProfile }) {
+  // Nunca viu o tutorial: ele abre sozinho na primeira entrada.
+  const firstVisit = profile.onboarding_completed_at === null;
+  const [tourOpen, setTourOpen] = useState(firstVisit);
   const pathname = usePathname();
   const router = useRouter();
   const isAdmin = profile.role === "admin";
@@ -91,6 +97,28 @@ export function AppSidebar({ profile }: { profile: SessionProfile }) {
       </nav>
 
       <div className="border-t border-border p-2">
+        <button
+          type="button"
+          onClick={() => setTourOpen(true)}
+          title="Como usar o sistema"
+          className={cn(
+            "mb-1 flex h-9 w-full items-center gap-3 rounded-lg px-2.5 text-[13px] transition-colors",
+            "justify-center text-muted-foreground hover:bg-secondary/50 hover:text-foreground lg:justify-start",
+          )}
+        >
+          <HelpCircle className="h-4 w-4 shrink-0" />
+          <span className="hidden lg:inline">Como usar</span>
+        </button>
+
+        <OnboardingTour
+          userId={profile.id}
+          firstName={profile.full_name.trim().split(/\s+/)[0] ?? profile.full_name}
+          isAdmin={isAdmin}
+          open={tourOpen}
+          onOpenChange={setTourOpen}
+          markCompleteOnClose={firstVisit}
+        />
+
         <div className="flex items-center gap-2 rounded-lg px-1 py-1.5">
           <Avatar className="h-7 w-7">
             <AvatarFallback className="bg-primary/15 text-[10px] font-semibold text-primary">

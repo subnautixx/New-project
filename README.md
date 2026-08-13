@@ -142,6 +142,20 @@ O campo **Consentimento** na ficha registra quando o cliente respondeu pela
 primeira vez. É gravado por trigger, na primeira mensagem recebida, e é a
 evidência que sustenta o uso de template mais adiante.
 
+### Tutorial de primeiro acesso
+
+Abre sozinho na primeira entrada e some depois — o estado fica em
+`profiles.onboarding_completed_at`, por usuário, então quem entra na equipe
+depois recebe o tutorial mesmo que o resto já o tenha visto. O botão
+**Como usar**, na barra lateral, reabre a qualquer momento sem remarcar nada.
+
+O passo mais importante é o da prospecção. Sem alguém explicar que a primeira
+mensagem sai do celular, a equipe tenta disparar em massa pelo CRM e derruba a
+qualidade do número — o tutorial existe principalmente para evitar isso.
+
+As ilustrações são esquemas montados em CSS, não capturas de tela: não
+desatualizam quando a interface muda.
+
 ### Respostas rápidas
 
 Vivem dentro do campo de mensagem, não numa tela de configuração: o consignador
