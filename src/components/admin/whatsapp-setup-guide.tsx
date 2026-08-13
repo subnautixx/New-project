@@ -1,9 +1,11 @@
 "use client";
 
-import { ArrowLeft, ArrowRight, Check, Copy } from "lucide-react";
+import { ArrowLeft, ArrowRight, Check, Copy, ExternalLink } from "lucide-react";
 import * as React from "react";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogDescription, DialogTitle } from "@/components/ui/dialog";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
 import { cn } from "@/lib/utils";
 
 /**
@@ -17,6 +19,55 @@ import { cn } from "@/lib/utils";
  * layout do painel com frequência e captura desatualizada engana mais do que
  * ajuda.
  */
+
+/** Onde a chave do aplicativo fica guardada entre visitas. */
+const APP_ID_STORAGE_KEY = "4fmotors:meta-app-id";
+
+/**
+ * Endereços do painel da Meta.
+ *
+ * A tela de configuração da API vive dentro de um aplicativo específico, então
+ * o endereço exato depende do ID dele. Sem o ID, cai na lista de aplicativos —
+ * um clique a mais, e nunca um link quebrado.
+ */
+function metaLinks(appId: string) {
+  const apiSetup = appId
+    ? `https://developers.facebook.com/apps/${appId}/whatsapp-business/wa-dev-console/`
+    : "https://developers.facebook.com/apps/";
+
+  return {
+    apiSetup,
+    createApp: "https://developers.facebook.com/apps/create/",
+    businessSettings: "https://business.facebook.com/settings",
+    systemUsers: "https://business.facebook.com/settings/system-users",
+    whatsappManager: "https://business.facebook.com/wa/manage/",
+  };
+}
+
+/** Só dígitos: é o formato do ID de aplicativo da Meta. */
+function sanitizeAppId(value: string) {
+  return value.replace(/\D/g, "").slice(0, 20);
+}
+
+/**
+ * Link para o painel da Meta, no meio do texto.
+ *
+ * Fica onde a tela é citada, e não em uma lista de atalhos no rodapé: quem lê
+ * "abra WhatsApp · Configuração da API" quer clicar naquela frase.
+ */
+function MetaLink({ href, children }: { href: string; children: React.ReactNode }) {
+  return (
+    <a
+      href={href}
+      target="_blank"
+      rel="noreferrer"
+      className="inline-flex items-baseline gap-0.5 font-medium text-primary underline-offset-2 hover:underline"
+    >
+      {children}
+      <ExternalLink className="h-3 w-3 shrink-0 self-center" />
+    </a>
+  );
+}
 
 /** Valor que o admin precisa copiar para o painel da Meta. */
 function CopyRow({ label, value }: { label: string; value: string }) {
@@ -188,13 +239,47 @@ function CoexistenceSketch() {
   );
 }
 
+/**
+ * O ID do aplicativo transforma os atalhos genéricos em links diretos.
+ * Fica no navegador de quem administra: não é segredo, e guardá-lo no banco
+ * só acrescentaria uma tabela para uma conveniência de tela.
+ */
+function AppIdField({ value, onChange }: { value: string; onChange: (value: string) => void }) {
+  return (
+    <div className="space-y-1.5 rounded-md border border-border bg-surface-muted/50 p-2.5">
+      <Label htmlFor="metaAppId" className="text-[11px] uppercase tracking-wide">
+        ID do aplicativo (opcional)
+      </Label>
+      <Input
+        id="metaAppId"
+        inputMode="numeric"
+        autoComplete="off"
+        placeholder="1234567890123456"
+        value={value}
+        onChange={(e) => onChange(sanitizeAppId(e.target.value))}
+        className="h-8 font-mono text-xs"
+      />
+      <p className="text-[11px] text-muted-foreground">
+        Está no topo do painel do aplicativo, ao lado do nome. Com ele preenchido, os atalhos
+        deste tutorial abrem direto no seu aplicativo — aqui e no passo do webhook.
+      </p>
+    </div>
+  );
+}
+
 interface GuideStep {
   title: string;
   visual: React.ReactNode;
   body: React.ReactNode;
 }
 
-function buildSteps(webhookUrl: string): GuideStep[] {
+function buildSteps(
+  webhookUrl: string,
+  appId: string,
+  onAppIdChange: (value: string) => void,
+): GuideStep[] {
+  const links = metaLinks(appId);
+
   return [
     {
       title: "Antes de começar",
@@ -209,15 +294,18 @@ function buildSteps(webhookUrl: string): GuideStep[] {
             <li className="flex gap-2">
               <span className="text-muted-foreground/60">1.</span>
               <span>
-                Uma conta no <strong className="text-foreground">Meta Business</strong> com a
+                Uma conta no <MetaLink href={links.businessSettings}>Meta Business</MetaLink> com a
                 empresa verificada.
               </span>
             </li>
             <li className="flex gap-2">
               <span className="text-muted-foreground/60">2.</span>
               <span>
-                Um aplicativo em <strong className="text-foreground">developers.facebook.com</strong>{" "}
-                com o produto <strong className="text-foreground">WhatsApp</strong> adicionado.
+                Um aplicativo em{" "}
+                <MetaLink href={links.createApp}>developers.facebook.com</MetaLink> com o produto{" "}
+                <strong className="text-foreground">WhatsApp</strong> adicionado — o link abre
+                direto na criação de aplicativo, e o tipo a escolher é{" "}
+                <strong className="text-foreground">Empresa</strong>.
               </span>
             </li>
             <li className="flex gap-2">
@@ -228,6 +316,8 @@ function buildSteps(webhookUrl: string): GuideStep[] {
               </span>
             </li>
           </ul>
+
+          <AppIdField value={appId} onChange={onAppIdChange} />
         </>
       ),
     },
@@ -238,7 +328,7 @@ function buildSteps(webhookUrl: string): GuideStep[] {
         <>
           <p>
             No aplicativo, abra{" "}
-            <strong className="text-foreground">WhatsApp · Configuração da API</strong>. Ali estão,
+            <MetaLink href={links.apiSetup}>WhatsApp · Configuração da API</MetaLink>. Ali estão,
             na mesma tela:
           </p>
           <ul className="list-disc space-y-1 pl-5 marker:text-muted-foreground/50">
@@ -257,9 +347,18 @@ function buildSteps(webhookUrl: string): GuideStep[] {
           </ul>
           <p className="rounded-md bg-amber-500/[0.08] px-2.5 py-2 text-xs text-amber-200/90 ring-1 ring-inset ring-amber-500/20">
             O token que aparece de cara é temporário e expira em 24 horas. Para a operação do dia
-            a dia, crie um <strong>usuário do sistema</strong> em Configurações do Business e gere
-            um token permanente para ele.
+            a dia, crie um{" "}
+            <a
+              href={links.systemUsers}
+              target="_blank"
+              rel="noreferrer"
+              className="font-semibold underline underline-offset-2"
+            >
+              usuário do sistema
+            </a>{" "}
+            em Configurações do Business e gere um token permanente para ele.
           </p>
+
         </>
       ),
     },
@@ -301,8 +400,8 @@ function buildSteps(webhookUrl: string): GuideStep[] {
         <>
           <p>
             É o webhook que faz as respostas dos clientes caírem na Inbox. No painel da Meta, em{" "}
-            <strong className="text-foreground">WhatsApp · Configuração</strong>, edite os webhooks
-            e informe:
+            <MetaLink href={links.apiSetup}>WhatsApp · Configuração</MetaLink>, edite os webhooks e
+            informe:
           </p>
 
           <div className="space-y-2 rounded-md border border-border bg-surface-muted/50 p-2.5">
@@ -359,6 +458,10 @@ function buildSteps(webhookUrl: string): GuideStep[] {
             Não apareceu? O webhook é o suspeito de sempre — confira a URL, o token de verificação
             e se o campo <code className="font-mono text-[11px]">messages</code> está assinado.
           </p>
+          <p>
+            Depois disso, o <MetaLink href={links.whatsappManager}>WhatsApp Manager</MetaLink> é
+            onde a Meta mostra a qualidade do número e o limite de conversas por dia.
+          </p>
         </>
       ),
     },
@@ -374,14 +477,23 @@ export function WhatsappSetupGuide({
 }) {
   const [index, setIndex] = React.useState(0);
   const [origin, setOrigin] = React.useState<string | null>(null);
+  const [appId, setAppId] = React.useState("");
 
-  // Lido depois da montagem: `window` não existe na renderização do servidor,
+  // Lidos depois da montagem: `window` não existe na renderização do servidor,
   // e ler ali produziria divergência de hidratação.
-  React.useEffect(() => setOrigin(window.location.origin), []);
+  React.useEffect(() => {
+    setOrigin(window.location.origin);
+    setAppId(sanitizeAppId(window.localStorage.getItem(APP_ID_STORAGE_KEY) ?? ""));
+  }, []);
+
+  function updateAppId(value: string) {
+    setAppId(value);
+    window.localStorage.setItem(APP_ID_STORAGE_KEY, value);
+  }
 
   const steps = React.useMemo(
-    () => buildSteps(`${origin ?? "https://seu-dominio"}/api/whatsapp/webhook`),
-    [origin],
+    () => buildSteps(`${origin ?? "https://seu-dominio"}/api/whatsapp/webhook`, appId, updateAppId),
+    [origin, appId],
   );
 
   const step = steps[index];

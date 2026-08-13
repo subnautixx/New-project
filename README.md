@@ -271,6 +271,12 @@ cada identificador, o cadastro aqui, o webhook (com a URL de callback pronta
 para copiar, montada a partir do domínio em que a aplicação está rodando) e o
 teste final. Quem opera a loja não precisa deste README.
 
+Cada tela do painel da Meta citada no tutorial é um link. O passo 1 aceita o
+**ID do aplicativo** — guardado no navegador de quem administra, não no banco:
+não é segredo, e uma tabela a mais não se justifica por uma conveniência de
+tela. Preenchido, os atalhos passam a abrir a configuração da API daquele
+aplicativo em vez da lista de aplicativos.
+
 ---
 
 ## Verificação
