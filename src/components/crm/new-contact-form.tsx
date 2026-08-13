@@ -2,6 +2,7 @@
 
 import { useRouter } from "next/navigation";
 import { useState } from "react";
+import { PhotoPicker } from "@/components/crm/photo-picker";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -16,6 +17,7 @@ import {
 import { Textarea } from "@/components/ui/textarea";
 import { SOURCE_PLATFORMS } from "@/lib/domain/lead";
 import { normalizePhone } from "@/lib/phone";
+import { uploadContactPhoto } from "@/lib/contacts/upload-photo";
 import { createSupabaseBrowserClient } from "@/lib/supabase/client";
 import type { AccountRef } from "@/lib/types/views";
 
@@ -38,6 +40,8 @@ export function NewContactForm({
   const [error, setError] = useState<string | null>(null);
   const [accountId, setAccountId] = useState<string>(accounts[0]?.id ?? NO_ACCOUNT);
   const [platform, setPlatform] = useState<string>(SOURCE_PLATFORMS[0]);
+  const [photo, setPhoto] = useState<File | null>(null);
+  const [name, setName] = useState("");
 
   async function handleSubmit(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -104,6 +108,12 @@ export function NewContactForm({
       is_primary: true,
     });
 
+    // A foto só pode ser enviada agora: antes disso não havia cliente a quem
+    // vinculá-la. Se falhar, o cadastro continua válido — sem foto.
+    if (photo) {
+      await uploadContactPhoto(contact.id, photo);
+    }
+
     if (accountId !== NO_ACCOUNT) {
       await supabase.from("conversations").insert({
         contact_id: contact.id,
@@ -118,15 +128,25 @@ export function NewContactForm({
 
   return (
     <form onSubmit={handleSubmit} className="mx-auto max-w-2xl space-y-6 p-4 sm:p-6">
-      <section className="space-y-3">
+      <section className="space-y-4">
         <h2 className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
           Proprietário
         </h2>
 
+        <PhotoPicker name={name} file={photo} onFileChange={setPhoto} />
+
         <div className="grid gap-3 sm:grid-cols-2">
           <div className="space-y-1.5">
             <Label htmlFor="fullName">Nome *</Label>
-            <Input id="fullName" name="fullName" required maxLength={120} autoComplete="off" />
+            <Input
+              id="fullName"
+              name="fullName"
+              required
+              maxLength={120}
+              autoComplete="off"
+              value={name}
+              onChange={(e) => setName(e.target.value)}
+            />
           </div>
 
           <div className="space-y-1.5">

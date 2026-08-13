@@ -98,7 +98,7 @@ export function MessageBubble({
   const hasMedia = message.message_type !== "text" && message.message_type !== "unsupported";
 
   return (
-    <div className={cn("flex w-full", outbound ? "justify-end" : "justify-start")}>
+    <div className={cn("motion-enter flex w-full", outbound ? "justify-end" : "justify-start")}>
       <div
         className={cn(
           // O canto reto do lado do remetente faz as vezes da "rabicho" do

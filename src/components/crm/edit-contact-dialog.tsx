@@ -3,6 +3,7 @@
 import { Loader2, Pencil } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { useState } from "react";
+import { PhotoPicker } from "@/components/crm/photo-picker";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -26,6 +27,7 @@ import {
 import { Textarea } from "@/components/ui/textarea";
 import { SOURCE_PLATFORMS } from "@/lib/domain/lead";
 import { normalizePhone } from "@/lib/phone";
+import { uploadContactPhoto } from "@/lib/contacts/upload-photo";
 import { createSupabaseBrowserClient } from "@/lib/supabase/client";
 import type { ContactRow, VehicleRow } from "@/lib/types/database";
 import { isoToLocalInput, localInputToIso } from "@/lib/time";
@@ -54,6 +56,9 @@ export function EditContactDialog({ contactId, compact = false, onSaved }: Props
   const [contact, setContact] = useState<ContactRow | null>(null);
   const [vehicle, setVehicle] = useState<VehicleRow | null>(null);
   const [platform, setPlatform] = useState<string>("");
+  const [photo, setPhoto] = useState<File | null>(null);
+  const [photoRemoved, setPhotoRemoved] = useState(false);
+  const [name, setName] = useState("");
 
   async function load(nextOpen: boolean) {
     setOpen(nextOpen);
@@ -81,6 +86,9 @@ export function EditContactDialog({ contactId, compact = false, onSaved }: Props
     }
 
     setContact(loadedContact);
+    setName(loadedContact.full_name);
+    setPhoto(null);
+    setPhotoRemoved(false);
     setVehicle(vehicles?.[0] ?? null);
     setPlatform(vehicles?.[0]?.source_platform ?? loadedContact.source_platform ?? "");
     setLoading(false);
@@ -109,7 +117,8 @@ export function EditContactDialog({ contactId, compact = false, onSaved }: Props
     const { error: contactError } = await supabase
       .from("contacts")
       .update({
-        full_name: String(form.get("fullName") ?? "").trim(),
+        full_name: name.trim(),
+        ...(photoRemoved && !photo ? { photo_path: null } : {}),
         phone_e164: phone,
         phone_raw: phoneInput,
         source_platform: platform || null,
@@ -160,6 +169,15 @@ export function EditContactDialog({ contactId, compact = false, onSaved }: Props
       return;
     }
 
+    if (photo) {
+      const upload = await uploadContactPhoto(contactId, photo);
+      if (!upload.ok) {
+        setError(upload.error);
+        setSaving(false);
+        return;
+      }
+    }
+
     setSaving(false);
     setOpen(false);
     onSaved?.();
@@ -198,6 +216,15 @@ export function EditContactDialog({ contactId, compact = false, onSaved }: Props
           <p className="py-6 text-sm text-destructive">{error ?? "Cliente não encontrado."}</p>
         ) : (
           <form onSubmit={handleSubmit} className="space-y-5">
+            <PhotoPicker
+              name={name}
+              contactId={contactId}
+              photoPath={photoRemoved ? null : contact.photo_path}
+              file={photo}
+              onFileChange={setPhoto}
+              onRemoveExisting={() => setPhotoRemoved(true)}
+            />
+
             <section className="grid gap-3 sm:grid-cols-2">
               <div className="space-y-1.5">
                 <Label htmlFor="edit-fullName">Nome *</Label>
@@ -206,7 +233,8 @@ export function EditContactDialog({ contactId, compact = false, onSaved }: Props
                   name="fullName"
                   required
                   maxLength={120}
-                  defaultValue={contact.full_name}
+                  value={name}
+                  onChange={(e) => setName(e.target.value)}
                 />
               </div>
               <div className="space-y-1.5">

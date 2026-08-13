@@ -109,6 +109,7 @@ export type ContactRow = {
   next_action_at: string | null;
   next_action_note: string | null;
   last_interaction_at: string | null;
+  photo_path: string | null;
   created_by: string | null;
   created_at: string;
   updated_at: string;

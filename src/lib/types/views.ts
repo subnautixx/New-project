@@ -46,6 +46,7 @@ export type ContactSummary = Pick<
   | "next_action_at"
   | "next_action_note"
   | "last_interaction_at"
+  | "photo_path"
   | "owner_user_id"
   | "created_at"
 >;

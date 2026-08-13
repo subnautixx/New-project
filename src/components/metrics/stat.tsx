@@ -18,7 +18,7 @@ export function Stat({
   return (
     <div
       className={cn(
-        "min-w-0 rounded-xl border bg-surface px-3.5 py-3 transition-colors",
+        "motion-enter min-w-0 rounded-xl border bg-surface px-3.5 py-3 transition-colors",
         emphasis ? "border-primary/25 bg-primary/[0.04]" : "border-border",
       )}
     >

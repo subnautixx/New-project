@@ -115,6 +115,31 @@ qualidade, sem dependência nova — e o áudio sai no formato nativo do WhatsAp
 
 Firefox e Safari já gravam em formato aceito; nesses o remux nem acontece.
 
+### Foto do cliente
+
+A Cloud API da Meta **não** expõe a foto de perfil de um contato: o webhook
+entrega `profile.name` e `wa_id`, e o endpoint de perfil existe apenas para o
+seu próprio número de negócio. Importar a foto automaticamente exigiria
+automação de WhatsApp Web, que está fora de questão.
+
+Então a foto é carregada pelo consignador, no cadastro ou na edição. Mesmo
+caminho da mídia das conversas: URL assinada, upload direto do navegador para
+um bucket privado, e exibição por rota autenticada — foto de cliente é dado
+pessoal e não fica em link público adivinhável.
+
+No cadastro o upload acontece **depois** de criar o cliente, porque antes disso
+não há a quem vinculá-la; se falhar, o cadastro continua válido, sem foto.
+
+### Movimento
+
+O vocabulário é curto e vive em `globals.css`: entrada (mensagem, indicador),
+surgimento (contador de não lidas), transição de diálogo e recuo no clique dos
+botões. Tudo entre 150 e 220 ms.
+
+Movimento aqui confirma que algo chegou ou mudou — numa ferramenta usada o dia
+inteiro, animação longa vira espera. E `prefers-reduced-motion` desliga tudo:
+não é preferência estética, animação pode causar desconforto vestibular real.
+
 ### Regras da Meta são respeitadas, não contornadas
 
 Fora da janela de 24 horas o envio comum é **bloqueado** com explicação na
@@ -237,6 +262,7 @@ src/
     ui/           primitivos (shadcn)
   lib/
     supabase/     clientes: sessão (RLS), navegador e service_role
+    contacts/     foto do cliente: validação, caminho e upload
     whatsapp/     Cloud API, webhook, ingestão, status
     audio/        remux WebM -> Ogg para as gravações do navegador
     data/         consultas e métricas

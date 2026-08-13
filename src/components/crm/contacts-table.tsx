@@ -4,6 +4,7 @@ import { MessageSquare, Search } from "lucide-react";
 import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
 import { Input } from "@/components/ui/input";
+import { ContactAvatar } from "@/components/crm/contact-avatar";
 import { EmptyState } from "@/components/ui/misc";
 import {
   Select,
@@ -135,17 +136,17 @@ export function ContactsTable({ contacts, users, isAdmin }: Props) {
             }
           />
         ) : (
-          <table className="w-full min-w-[720px] border-collapse text-sm">
+          <table className="w-full min-w-[1020px] border-collapse text-sm">
             <thead className="sticky top-0 z-10 bg-background">
               <tr className="border-b border-border text-left text-[11px] uppercase tracking-wide text-muted-foreground">
-                <th className="px-4 py-2 font-medium">Cliente</th>
-                <th className="px-4 py-2 font-medium">Veículo</th>
-                <th className="px-4 py-2 font-medium">Preço</th>
-                <th className="px-4 py-2 font-medium">Origem</th>
-                <th className="px-4 py-2 font-medium">Status</th>
-                {isAdmin ? <th className="px-4 py-2 font-medium">Responsável</th> : null}
-                <th className="px-4 py-2 font-medium">Última interação</th>
-                <th className="px-4 py-2 font-medium">Próxima ação</th>
+                <th className="whitespace-nowrap px-4 py-2 font-medium">Cliente</th>
+                <th className="whitespace-nowrap px-4 py-2 font-medium">Veículo</th>
+                <th className="whitespace-nowrap px-4 py-2 font-medium">Preço</th>
+                <th className="whitespace-nowrap px-4 py-2 font-medium">Origem</th>
+                <th className="whitespace-nowrap px-4 py-2 font-medium">Status</th>
+                {isAdmin ? <th className="whitespace-nowrap px-4 py-2 font-medium">Responsável</th> : null}
+                <th className="whitespace-nowrap px-4 py-2 font-medium">Última interação</th>
+                <th className="whitespace-nowrap px-4 py-2 font-medium">Próxima ação</th>
                 <th className="w-10 px-4 py-2" />
               </tr>
             </thead>
@@ -153,20 +154,33 @@ export function ContactsTable({ contacts, users, isAdmin }: Props) {
               {filtered.map((c) => (
                 <tr key={c.id} className="border-b border-border/50 transition-colors hover:bg-surface">
                   <td className="px-4 py-2">
-                    <Link href={`/clientes/${c.id}`} className="block hover:underline">
-                      <span className="font-medium">{c.full_name}</span>
-                      <span className="block text-xs text-muted-foreground">
-                        {formatPhone(c.phone_e164)}
+                    <Link
+                      href={`/clientes/${c.id}`}
+                      className="group flex max-w-[220px] items-center gap-2.5"
+                    >
+                      <ContactAvatar
+                        contactId={c.id}
+                        name={c.full_name}
+                        photoPath={c.photo_path}
+                        className="h-8 w-8"
+                      />
+                      <span className="min-w-0 flex-1">
+                        <span className="block truncate font-medium group-hover:underline">
+                          {c.full_name}
+                        </span>
+                        <span className="block whitespace-nowrap text-xs text-muted-foreground">
+                          {formatPhone(c.phone_e164)}
+                        </span>
                       </span>
                     </Link>
                   </td>
-                  <td className="px-4 py-2">
+                  <td className="whitespace-nowrap px-4 py-2">
                     {[c.vehicle?.brand, c.vehicle?.model].filter(Boolean).join(" ") || "—"}
                     {c.vehicle?.year ? (
                       <span className="block text-xs text-muted-foreground">{c.vehicle.year}</span>
                     ) : null}
                   </td>
-                  <td className="px-4 py-2 text-muted-foreground">
+                  <td className="whitespace-nowrap px-4 py-2 text-muted-foreground">
                     {formatCurrencyBRL(c.vehicle?.listed_price)}
                   </td>
                   <td className="px-4 py-2 text-muted-foreground">
@@ -181,9 +195,11 @@ export function ContactsTable({ contacts, users, isAdmin }: Props) {
                     </span>
                   </td>
                   {isAdmin ? (
-                    <td className="px-4 py-2 text-muted-foreground">{c.owner?.full_name ?? "—"}</td>
+                    <td className="whitespace-nowrap px-4 py-2 text-muted-foreground">
+                      {c.owner?.full_name ?? "—"}
+                    </td>
                   ) : null}
-                  <td className="px-4 py-2 text-muted-foreground">
+                  <td className="whitespace-nowrap px-4 py-2 text-muted-foreground">
                     {formatDate(c.last_interaction_at)}
                   </td>
                   <td className="px-4 py-2">

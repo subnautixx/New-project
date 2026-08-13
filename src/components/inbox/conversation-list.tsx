@@ -2,7 +2,7 @@
 
 import { Search, X } from "lucide-react";
 import { useMemo, useState } from "react";
-import { Avatar, AvatarFallback } from "@/components/ui/avatar";
+import { ContactAvatar } from "@/components/crm/contact-avatar";
 import { Input } from "@/components/ui/input";
 import {
   Select,
@@ -15,7 +15,7 @@ import { ALL_STATUSES, STATUS_DOT, STATUS_LABEL } from "@/lib/domain/lead";
 import { formatListTime } from "@/lib/format";
 import type { LeadStatus } from "@/lib/types/database";
 import type { ConversationListItem, UserRef } from "@/lib/types/views";
-import { cn, initials } from "@/lib/utils";
+import { cn } from "@/lib/utils";
 
 interface Props {
   conversations: ConversationListItem[];
@@ -232,19 +232,16 @@ function ConversationRow({
       >
         {/* Marcador de seleção: mais legível que só a mudança de fundo. */}
         {selected ? (
-          <span className="absolute left-0 top-1/2 h-7 w-[3px] -translate-y-1/2 rounded-r-full bg-primary" />
+          <span className="motion-fade absolute left-0 top-1/2 h-7 w-[3px] -translate-y-1/2 rounded-r-full bg-primary" />
         ) : null}
 
-        <Avatar className="mt-0.5 h-9 w-9 shrink-0">
-          <AvatarFallback
-            className={cn(
-              "text-[11px] font-semibold",
-              unread ? "bg-primary/15 text-primary" : "bg-surface-muted text-muted-foreground",
-            )}
-          >
-            {initials(c.contact.full_name)}
-          </AvatarFallback>
-        </Avatar>
+        <ContactAvatar
+          contactId={c.contact.id}
+          name={c.contact.full_name}
+          photoPath={c.contact.photo_path}
+          highlighted={unread}
+          className="mt-0.5"
+        />
 
         <div className="min-w-0 flex-1 space-y-0.5">
           <div className="flex items-baseline gap-2">
@@ -276,7 +273,7 @@ function ConversationRow({
               {c.last_message_preview ?? "Sem mensagens"}
             </span>
             {unread ? (
-              <span className="flex h-[18px] min-w-[18px] shrink-0 items-center justify-center rounded-full bg-primary px-1 text-[10px] font-bold tabular-nums text-primary-foreground">
+              <span className="motion-pop flex h-[18px] min-w-[18px] shrink-0 items-center justify-center rounded-full bg-primary px-1 text-[10px] font-bold tabular-nums text-primary-foreground">
                 {c.unread_count > 99 ? "99+" : c.unread_count}
               </span>
             ) : null}

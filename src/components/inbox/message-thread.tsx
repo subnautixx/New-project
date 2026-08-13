@@ -2,14 +2,14 @@
 
 import { ArrowLeft, Info, Loader2 } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
-import { Avatar, AvatarFallback } from "@/components/ui/avatar";
+import { ContactAvatar } from "@/components/crm/contact-avatar";
 import { Button } from "@/components/ui/button";
 import { EmptyState } from "@/components/ui/misc";
 import { STATUS_DOT, STATUS_LABEL } from "@/lib/domain/lead";
 import { dayKey, formatDayDivider } from "@/lib/format";
 import { createSupabaseBrowserClient } from "@/lib/supabase/client";
 import type { ConversationListItem, ThreadMessage, UserRef } from "@/lib/types/views";
-import { cn, initials } from "@/lib/utils";
+import { cn } from "@/lib/utils";
 import { Composer } from "./composer";
 import { MessageBubble } from "./message-bubble";
 
@@ -98,11 +98,12 @@ export function MessageThread({
           <span className="sr-only">Voltar</span>
         </Button>
 
-        <Avatar className="h-8 w-8 shrink-0">
-          <AvatarFallback className="bg-surface-muted text-[11px] font-semibold text-muted-foreground">
-            {initials(conversation.contact.full_name)}
-          </AvatarFallback>
-        </Avatar>
+        <ContactAvatar
+          contactId={conversation.contact.id}
+          name={conversation.contact.full_name}
+          photoPath={conversation.contact.photo_path}
+          className="h-8 w-8"
+        />
 
         <div className="min-w-0 flex-1">
           <p className="truncate text-[13px] font-semibold leading-5">

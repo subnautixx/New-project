@@ -3,6 +3,7 @@
 import { ExternalLink, Loader2, Send } from "lucide-react";
 import Link from "next/link";
 import { useEffect, useState } from "react";
+import { ContactAvatar } from "@/components/crm/contact-avatar";
 import { EditContactDialog } from "@/components/crm/edit-contact-dialog";
 import { StatusSelect } from "@/components/crm/status-select";
 import { TransferDialog } from "@/components/crm/transfer-dialog";
@@ -83,9 +84,17 @@ export function ContactPanel({ conversation, users, isAdmin, currentUserId, onCh
       <div className="space-y-4 p-4">
         <div className="space-y-2">
           <div className="flex items-start justify-between gap-2">
-            <div className="min-w-0">
-              <h2 className="truncate text-sm font-semibold">{contact.full_name}</h2>
-              <p className="text-xs text-muted-foreground">{formatPhone(contact.phone_e164)}</p>
+            <div className="flex min-w-0 items-center gap-2.5">
+              <ContactAvatar
+                contactId={contact.id}
+                name={contact.full_name}
+                photoPath={contact.photo_path}
+                className="h-11 w-11"
+              />
+              <div className="min-w-0">
+                <h2 className="truncate text-sm font-semibold">{contact.full_name}</h2>
+                <p className="text-xs text-muted-foreground">{formatPhone(contact.phone_e164)}</p>
+              </div>
             </div>
             <EditContactDialog contactId={contact.id} compact onSaved={onChanged} />
           </div>
