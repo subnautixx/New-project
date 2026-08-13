@@ -99,3 +99,45 @@ export function isSameDayInAppTz(a: Date | string, b: Date | string): boolean {
   const keyA = dayKeyInAppTz(a);
   return keyA !== "" && keyA === dayKeyInAppTz(b);
 }
+
+/**
+ * Instante em UTC -> valor de um `<input type="datetime-local">`.
+ *
+ * O input não carrega fuso: ele mostra e devolve texto solto. Se a conversão
+ * usasse o fuso do navegador, um consignador com o relógio em outro fuso veria
+ * e gravaria horários diferentes dos colegas para o mesmo compromisso.
+ */
+export function isoToLocalInput(iso: string | null | undefined): string {
+  if (!iso) return "";
+
+  const date = new Date(iso);
+  if (Number.isNaN(date.getTime())) return "";
+
+  const p = zonedParts(date);
+  const pad = (value: number) => String(value).padStart(2, "0");
+
+  return `${p.year}-${pad(p.month)}-${pad(p.day)}T${pad(p.hour)}:${pad(p.minute)}`;
+}
+
+/** Valor de `<input type="datetime-local">` (horário local) -> instante ISO. */
+export function localInputToIso(value: string): string | null {
+  const match = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})$/.exec(value.trim());
+  if (!match) return null;
+
+  const [, year, month, day, hour, minute] = match;
+
+  // Interpreta o texto como se fosse UTC e desconta o deslocamento real do
+  // fuso naquele instante.
+  const asUtc = Date.UTC(
+    Number(year),
+    Number(month) - 1,
+    Number(day),
+    Number(hour),
+    Number(minute),
+  );
+
+  const offset = timeZoneOffsetMs(new Date(asUtc));
+  const instant = new Date(asUtc - offset);
+
+  return Number.isNaN(instant.getTime()) ? null : instant.toISOString();
+}

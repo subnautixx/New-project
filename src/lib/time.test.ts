@@ -4,6 +4,8 @@ import {
   dayKeyInAppTz,
   hourInAppTz,
   isSameDayInAppTz,
+  isoToLocalInput,
+  localInputToIso,
   startOfDayInAppTz,
   timeZoneOffsetMs,
 } from "./time";
@@ -85,5 +87,37 @@ describe("isSameDayInAppTz", () => {
   it("compara pelo dia local", () => {
     expect(isSameDayInAppTz("2026-08-12T23:00:00Z", "2026-08-13T01:00:00Z")).toBe(true);
     expect(isSameDayInAppTz("2026-08-13T02:00:00Z", "2026-08-13T04:00:00Z")).toBe(false);
+  });
+});
+
+describe("isoToLocalInput / localInputToIso", () => {
+  it("mostra o instante no horário de Brasília", () => {
+    // 19:32 UTC = 16:32 local.
+    expect(isoToLocalInput("2026-08-12T19:32:00Z")).toBe("2026-08-12T16:32");
+  });
+
+  it("usa o dia local quando em UTC já virou", () => {
+    expect(isoToLocalInput("2026-08-13T01:00:00Z")).toBe("2026-08-12T22:00");
+  });
+
+  it("converte o valor digitado de volta para instante", () => {
+    expect(localInputToIso("2026-08-12T16:32")).toBe("2026-08-12T19:32:00.000Z");
+  });
+
+  it("faz round-trip sem deslocar o horário", () => {
+    const original = "2026-03-04T09:15";
+    expect(isoToLocalInput(localInputToIso(original))).toBe(original);
+  });
+
+  it("faz round-trip a partir do instante", () => {
+    const instant = "2026-11-20T23:45:00.000Z";
+    expect(localInputToIso(isoToLocalInput(instant))).toBe(instant);
+  });
+
+  it("lida com valor ausente ou malformado", () => {
+    expect(isoToLocalInput(null)).toBe("");
+    expect(isoToLocalInput("nao-e-data")).toBe("");
+    expect(localInputToIso("")).toBeNull();
+    expect(localInputToIso("12/08/2026 16:32")).toBeNull();
   });
 });

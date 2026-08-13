@@ -9,7 +9,12 @@ export const metadata: Metadata = { title: "Inbox" };
 // A inbox reflete o estado agora; nada aqui pode vir de cache.
 export const dynamic = "force-dynamic";
 
-export default async function InboxPage() {
+export default async function InboxPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ c?: string }>;
+}) {
+  const { c: conversationParam } = await searchParams;
   const profile = await requireProfile();
   const supabase = await createSupabaseServerClient();
 
@@ -25,6 +30,7 @@ export default async function InboxPage() {
       users={users}
       isAdmin={profile.role === "admin"}
       currentUserId={profile.id}
+      initialConversationId={conversationParam ?? null}
     />
   );
 }

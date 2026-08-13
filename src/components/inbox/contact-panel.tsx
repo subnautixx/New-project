@@ -1,7 +1,9 @@
 "use client";
 
 import { ExternalLink, Loader2, Send } from "lucide-react";
+import Link from "next/link";
 import { useEffect, useState } from "react";
+import { EditContactDialog } from "@/components/crm/edit-contact-dialog";
 import { StatusSelect } from "@/components/crm/status-select";
 import { TransferDialog } from "@/components/crm/transfer-dialog";
 import { Badge } from "@/components/ui/badge";
@@ -79,9 +81,22 @@ export function ContactPanel({ conversation, users, isAdmin, currentUserId, onCh
   return (
     <aside className="flex h-full w-full flex-col overflow-y-auto border-l border-border bg-surface">
       <div className="space-y-4 p-4">
-        <div className="space-y-1">
-          <h2 className="text-sm font-semibold">{contact.full_name}</h2>
-          <p className="text-xs text-muted-foreground">{formatPhone(contact.phone_e164)}</p>
+        <div className="space-y-2">
+          <div className="flex items-start justify-between gap-2">
+            <div className="min-w-0">
+              <h2 className="truncate text-sm font-semibold">{contact.full_name}</h2>
+              <p className="text-xs text-muted-foreground">{formatPhone(contact.phone_e164)}</p>
+            </div>
+            <EditContactDialog contactId={contact.id} compact onSaved={onChanged} />
+          </div>
+
+          <Link
+            href={`/clientes/${contact.id}`}
+            className="inline-flex items-center gap-1 text-xs text-primary underline-offset-2 hover:underline"
+          >
+            Ver ficha completa
+            <ExternalLink className="h-3 w-3" />
+          </Link>
         </div>
 
         <StatusSelect

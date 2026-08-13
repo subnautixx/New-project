@@ -57,6 +57,10 @@ Detalhes que importam:
   um admin autenticado e fica registrado em `audit_logs`.
 - O Realtime herda as mesmas policies de `SELECT`: ninguém é notificado de uma
   conversa que não poderia ler.
+- O destino pós-login é validado (`lib/safe-redirect.ts`). Checar só se começa
+  com `/` deixaria passar `//site-externo.com`, que o navegador trata como
+  endereço absoluto — bastaria mandar esse link a um consignador para levá-lo a
+  um login falso depois de autenticar de verdade.
 
 ### Fluxo de recebimento
 
@@ -239,6 +243,11 @@ ruído e peso ao bundle.
 **Remux em vez de transcodificação.** Trocar o contêiner do áudio custa
 ~300 linhas testadas; `ffmpeg.wasm` custaria alguns megabytes no bundle e uma
 espera visível a cada gravação, para um resultado idêntico.
+
+**Edição em diálogo, não em página.** O mesmo formulário serve a ficha da
+inbox e a página do cliente. Ele busca os dados ao abrir em vez de recebê-los
+por prop: as duas telas carregam recortes diferentes do registro, e salvar em
+cima de um estado parcial apagaria campo que a tela de origem não conhecia.
 
 **Status como ponto na lista, badge na ficha.** Onde a densidade importa, um
 ponto de 6px carrega a mesma informação que um badge sem competir com o nome do

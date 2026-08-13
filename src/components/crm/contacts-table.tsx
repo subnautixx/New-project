@@ -30,6 +30,14 @@ export function ContactsTable({ contacts, users, isAdmin }: Props) {
   const [search, setSearch] = useState("");
   const [status, setStatus] = useState<LeadStatus | "todos">("todos");
   const [owner, setOwner] = useState("todos");
+  const [pendingOnly, setPendingOnly] = useState(false);
+
+  // "Próxima ação vencida" é a pergunta que o consignador faz ao abrir o CRM
+  // de manhã. Sem isso o campo só existiria dentro da ficha de cada cliente.
+  const now = Date.now();
+  const overdueCount = contacts.filter(
+    (c) => c.next_action_at && new Date(c.next_action_at).getTime() <= now,
+  ).length;
 
   const filtered = useMemo(() => {
     const term = search.trim().toLowerCase();
@@ -38,6 +46,7 @@ export function ContactsTable({ contacts, users, isAdmin }: Props) {
     return contacts.filter((c) => {
       if (status !== "todos" && c.status !== status) return false;
       if (owner !== "todos" && c.owner_user_id !== owner) return false;
+      if (pendingOnly && !c.next_action_at) return false;
       if (!term) return true;
 
       const vehicle = [c.vehicle?.brand, c.vehicle?.model, c.vehicle?.version]
@@ -51,7 +60,7 @@ export function ContactsTable({ contacts, users, isAdmin }: Props) {
         (digits.length > 0 && c.phone_e164.includes(digits))
       );
     });
-  }, [contacts, search, status, owner]);
+  }, [contacts, search, status, owner, pendingOnly]);
 
   return (
     <div className="flex min-h-0 flex-1 flex-col">
@@ -97,6 +106,12 @@ export function ContactsTable({ contacts, users, isAdmin }: Props) {
           </Select>
         ) : null}
 
+        <FilterToggle
+          active={pendingOnly}
+          onClick={() => setPendingOnly((v) => !v)}
+          count={overdueCount}
+        />
+
         <span className="ml-auto text-xs text-muted-foreground">
           {filtered.length} de {contacts.length}
         </span>
@@ -123,6 +138,7 @@ export function ContactsTable({ contacts, users, isAdmin }: Props) {
                 <th className="px-4 py-2 font-medium">Status</th>
                 {isAdmin ? <th className="px-4 py-2 font-medium">Responsável</th> : null}
                 <th className="px-4 py-2 font-medium">Última interação</th>
+                <th className="px-4 py-2 font-medium">Próxima ação</th>
                 <th className="w-10 px-4 py-2" />
               </tr>
             </thead>
@@ -161,9 +177,12 @@ export function ContactsTable({ contacts, users, isAdmin }: Props) {
                     {formatDate(c.last_interaction_at)}
                   </td>
                   <td className="px-4 py-2">
+                    <NextAction at={c.next_action_at} note={c.next_action_note} />
+                  </td>
+                  <td className="px-4 py-2">
                     {c.conversation_id ? (
                       <Link
-                        href="/inbox"
+                        href={`/inbox?c=${c.conversation_id}`}
                         title="Abrir conversa"
                         className="text-muted-foreground hover:text-foreground"
                       >
@@ -179,5 +198,50 @@ export function ContactsTable({ contacts, users, isAdmin }: Props) {
         )}
       </div>
     </div>
+  );
+}
+
+function FilterToggle({
+  active,
+  onClick,
+  count,
+}: {
+  active: boolean;
+  onClick: () => void;
+  count: number;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      aria-pressed={active}
+      className={cn(
+        "inline-flex h-9 items-center gap-1.5 rounded-md px-3 text-xs ring-1 ring-inset transition-colors",
+        active
+          ? "bg-primary/10 font-medium text-primary ring-primary/25"
+          : "text-muted-foreground ring-border hover:text-foreground",
+      )}
+    >
+      Com próxima ação
+      {count > 0 ? (
+        <span className="rounded-full bg-amber-500/15 px-1.5 text-[10px] font-semibold text-amber-300">
+          {count}
+        </span>
+      ) : null}
+    </button>
+  );
+}
+
+/** Data da próxima ação, destacada quando já passou do horário marcado. */
+function NextAction({ at, note }: { at: string | null; note: string | null }) {
+  if (!at) return <span className="text-muted-foreground/50">—</span>;
+
+  const overdue = new Date(at).getTime() <= Date.now();
+
+  return (
+    <span className={cn("text-xs", overdue ? "font-medium text-amber-300" : "text-muted-foreground")}>
+      {formatDate(at)}
+      {note ? <span className="block truncate text-[11px] text-muted-foreground">{note}</span> : null}
+    </span>
   );
 }

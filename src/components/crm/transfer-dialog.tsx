@@ -22,15 +22,23 @@ import {
 } from "@/components/ui/select";
 import type { UserRef } from "@/lib/types/views";
 
-/** Transferência de conversa. Só o administrador enxerga este botão — e só ele
- *  passa pela verificação do backend, da RLS e do trigger. */
+/**
+ * Transferência entre consignadores. Só o administrador enxerga este botão — e
+ * só ele passa pela verificação do backend, da RLS e do trigger.
+ *
+ * Aceita conversa ou cliente: um prospect recém cadastrado ainda não tem
+ * conversa, e mesmo assim precisa poder mudar de responsável. Os dois caminhos
+ * convergem, porque trocar o dono do cliente propaga para as conversas dele.
+ */
 export function TransferDialog({
   conversationId,
+  contactId,
   currentUserId,
   users,
   onTransferred,
 }: {
-  conversationId: string;
+  conversationId?: string;
+  contactId?: string;
   currentUserId: string;
   users: UserRef[];
   onTransferred?: () => void;
@@ -44,15 +52,23 @@ export function TransferDialog({
   const options = users.filter((u) => u.id !== currentUserId);
 
   async function submit() {
-    if (!toUserId || pending) return;
+    if (!toUserId || pending || (!conversationId && !contactId)) return;
 
     setPending(true);
     setError(null);
 
-    const response = await fetch(`/api/conversations/${conversationId}/transfer`, {
+    const endpoint = conversationId
+      ? `/api/conversations/${conversationId}/transfer`
+      : `/api/contacts/${contactId}/transfer`;
+
+    const response = await fetch(endpoint, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ toUserId, reason: reason.trim() || undefined, transferContact: true }),
+      body: JSON.stringify({
+        toUserId,
+        reason: reason.trim() || undefined,
+        ...(conversationId ? { transferContact: true } : {}),
+      }),
     });
 
     if (!response.ok) {
@@ -81,8 +97,8 @@ export function TransferDialog({
         <DialogHeader>
           <DialogTitle>Transferir atendimento</DialogTitle>
           <DialogDescription>
-            O cliente e a conversa passam para o novo responsável. O histórico é preservado e a
-            ação fica registrada na auditoria.
+            O cliente e suas conversas passam para o novo responsável. O histórico é preservado e
+            a ação fica registrada na auditoria.
           </DialogDescription>
         </DialogHeader>
 

@@ -3,13 +3,15 @@ import type { Metadata } from "next";
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { ContactNotes } from "@/components/crm/contact-notes";
+import { EditContactDialog } from "@/components/crm/edit-contact-dialog";
 import { StatusSelect } from "@/components/crm/status-select";
+import { TransferDialog } from "@/components/crm/transfer-dialog";
 import { PageHeader } from "@/components/layout/page-header";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Field, Separator } from "@/components/ui/misc";
 import { requireProfile } from "@/lib/auth/session";
-import { fetchContactNotes, fetchStatusHistory } from "@/lib/data/queries";
+import { fetchActiveUsers, fetchContactNotes, fetchStatusHistory } from "@/lib/data/queries";
 import { STATUS_LABEL } from "@/lib/domain/lead";
 import { formatDate, formatDateTime } from "@/lib/format";
 import { formatPhone } from "@/lib/phone";
@@ -38,14 +40,30 @@ export default async function ContactDetailPage({
 
   if (!contact) notFound();
 
-  const [{ data: vehicles }, { data: owner }, notes, history] = await Promise.all([
-    supabase.from("vehicles").select("*").eq("contact_id", id).order("is_primary", { ascending: false }),
-    supabase.from("profiles").select("id, full_name").eq("id", contact.owner_user_id).maybeSingle(),
-    fetchContactNotes(supabase, id),
-    fetchStatusHistory(supabase, id),
-  ]);
+  const isAdmin = profile.role === "admin";
+
+  const [{ data: vehicles }, { data: owner }, { data: conversation }, users, notes, history] =
+    await Promise.all([
+      supabase
+        .from("vehicles")
+        .select("*")
+        .eq("contact_id", id)
+        .order("is_primary", { ascending: false }),
+      supabase.from("profiles").select("id, full_name").eq("id", contact.owner_user_id).maybeSingle(),
+      supabase
+        .from("conversations")
+        .select("id")
+        .eq("contact_id", id)
+        .order("last_message_at", { ascending: false, nullsFirst: false })
+        .limit(1)
+        .maybeSingle(),
+      isAdmin ? fetchActiveUsers(supabase) : Promise.resolve([]),
+      fetchContactNotes(supabase, id),
+      fetchStatusHistory(supabase, id),
+    ]);
 
   const vehicle = vehicles?.[0] ?? null;
+  const conversationId = conversation?.id ?? null;
   const listingUrl = vehicle?.listing_url ?? contact.listing_url;
 
   return (
@@ -54,9 +72,14 @@ export default async function ContactDetailPage({
         title={contact.full_name}
         description={formatPhone(contact.phone_e164)}
         action={
-          <Button asChild variant="outline" size="sm">
-            <Link href="/inbox">Abrir inbox</Link>
-          </Button>
+          <div className="flex items-center gap-2">
+            <EditContactDialog contactId={id} />
+            {conversationId ? (
+              <Button asChild size="sm">
+                <Link href={`/inbox?c=${conversationId}`}>Abrir conversa</Link>
+              </Button>
+            ) : null}
+          </div>
         }
       />
 
@@ -120,7 +143,18 @@ export default async function ContactDetailPage({
 
               <Separator />
 
-              <Field label="Responsável">{owner?.full_name ?? "—"}</Field>
+              <Field label="Responsável">
+                <div className="flex items-center justify-between gap-2">
+                  <span>{owner?.full_name ?? "—"}</span>
+                  {isAdmin ? (
+                    <TransferDialog
+                      contactId={id}
+                      currentUserId={contact.owner_user_id}
+                      users={users}
+                    />
+                  ) : null}
+                </div>
+              </Field>
               <Field label="Cadastrado em">{formatDate(contact.created_at)}</Field>
               <Field label="Última interação">{formatDate(contact.last_interaction_at)}</Field>
 

@@ -54,8 +54,14 @@ export async function middleware(request: NextRequest) {
     }
 
     const url = request.nextUrl.clone();
+    const search = request.nextUrl.search;
+
     url.pathname = "/login";
-    url.searchParams.set("next", pathname);
+    url.search = "";
+    // Guarda o destino completo: sem a query, um link direto para uma conversa
+    // (`/inbox?c=...`) cairia na inbox genérica depois do login.
+    url.searchParams.set("next", `${pathname}${search}`);
+
     return NextResponse.redirect(url);
   }
 

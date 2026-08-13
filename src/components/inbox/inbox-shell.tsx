@@ -16,14 +16,29 @@ interface Props {
   users: UserRef[];
   isAdmin: boolean;
   currentUserId: string;
+  /** Conversa vinda de `?c=` — permite linkar direto de Clientes para o atendimento. */
+  initialConversationId?: string | null;
 }
 
 /** Espera antes de recarregar a lista: numa rajada de mensagens, uma ida só. */
 const REFRESH_DEBOUNCE_MS = 400;
 
-export function InboxShell({ conversations, users, isAdmin, currentUserId }: Props) {
+export function InboxShell({
+  conversations,
+  users,
+  isAdmin,
+  currentUserId,
+  initialConversationId,
+}: Props) {
   const router = useRouter();
-  const [selectedId, setSelectedId] = useState<string | null>(conversations[0]?.id ?? null);
+  const [selectedId, setSelectedId] = useState<string | null>(() => {
+    // Só respeita o parâmetro se a conversa estiver realmente visível para
+    // este usuário — a RLS já filtrou a lista, então basta procurar nela.
+    if (initialConversationId && conversations.some((c) => c.id === initialConversationId)) {
+      return initialConversationId;
+    }
+    return conversations[0]?.id ?? null;
+  });
   const [showDetails, setShowDetails] = useState(false);
   const [threadToken, setThreadToken] = useState(0);
   const refreshTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -77,6 +92,9 @@ export function InboxShell({ conversations, users, isAdmin, currentUserId }: Pro
   function handleSelect(id: string) {
     setSelectedId(id);
     setShowDetails(false);
+
+    // Mantém a URL compartilhável e o botão voltar coerente, sem recarregar.
+    window.history.replaceState(null, "", `/inbox?c=${id}`);
   }
 
   return (
