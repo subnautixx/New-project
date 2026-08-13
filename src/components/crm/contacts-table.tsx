@@ -2,8 +2,7 @@
 
 import { MessageSquare, Search } from "lucide-react";
 import Link from "next/link";
-import { useMemo, useState } from "react";
-import { Badge } from "@/components/ui/badge";
+import { useEffect, useMemo, useState } from "react";
 import { Input } from "@/components/ui/input";
 import { EmptyState } from "@/components/ui/misc";
 import {
@@ -13,7 +12,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { ALL_STATUSES, STATUS_CLASS, STATUS_LABEL } from "@/lib/domain/lead";
+import { ALL_STATUSES, STATUS_DOT, STATUS_LABEL } from "@/lib/domain/lead";
 import { formatDate } from "@/lib/format";
 import { formatPhone } from "@/lib/phone";
 import type { LeadStatus } from "@/lib/types/database";
@@ -32,12 +31,20 @@ export function ContactsTable({ contacts, users, isAdmin }: Props) {
   const [owner, setOwner] = useState("todos");
   const [pendingOnly, setPendingOnly] = useState(false);
 
+  // O "agora" só é definido depois de montar. Calculá-lo durante o render
+  // daria valores diferentes no servidor e no navegador, e o React acusaria
+  // divergência de hidratação em toda linha com prazo vencido.
+  const [now, setNow] = useState<number | null>(null);
+  useEffect(() => setNow(Date.now()), []);
+
   // "Próxima ação vencida" é a pergunta que o consignador faz ao abrir o CRM
   // de manhã. Sem isso o campo só existiria dentro da ficha de cada cliente.
-  const now = Date.now();
-  const overdueCount = contacts.filter(
-    (c) => c.next_action_at && new Date(c.next_action_at).getTime() <= now,
-  ).length;
+  const overdueCount =
+    now === null
+      ? 0
+      : contacts.filter(
+          (c) => c.next_action_at && new Date(c.next_action_at).getTime() <= now,
+        ).length;
 
   const filtered = useMemo(() => {
     const term = search.trim().toLowerCase();
@@ -144,7 +151,7 @@ export function ContactsTable({ contacts, users, isAdmin }: Props) {
             </thead>
             <tbody>
               {filtered.map((c) => (
-                <tr key={c.id} className="border-b border-border/60 hover:bg-surface">
+                <tr key={c.id} className="border-b border-border/50 transition-colors hover:bg-surface">
                   <td className="px-4 py-2">
                     <Link href={`/clientes/${c.id}`} className="block hover:underline">
                       <span className="font-medium">{c.full_name}</span>
@@ -166,9 +173,12 @@ export function ContactsTable({ contacts, users, isAdmin }: Props) {
                     {c.vehicle?.source_platform ?? c.source_platform ?? "—"}
                   </td>
                   <td className="px-4 py-2">
-                    <Badge className={cn("ring-1", STATUS_CLASS[c.status])}>
+                    {/* Mesmo idioma da lista de conversas: com 22 linhas, um
+                        badge por linha vira parede de cor e nada se destaca. */}
+                    <span className="flex items-center gap-1.5 whitespace-nowrap">
+                      <span className={cn("h-1.5 w-1.5 rounded-full", STATUS_DOT[c.status])} />
                       {STATUS_LABEL[c.status]}
-                    </Badge>
+                    </span>
                   </td>
                   {isAdmin ? (
                     <td className="px-4 py-2 text-muted-foreground">{c.owner?.full_name ?? "—"}</td>
@@ -177,7 +187,7 @@ export function ContactsTable({ contacts, users, isAdmin }: Props) {
                     {formatDate(c.last_interaction_at)}
                   </td>
                   <td className="px-4 py-2">
-                    <NextAction at={c.next_action_at} note={c.next_action_note} />
+                    <NextAction at={c.next_action_at} note={c.next_action_note} now={now} />
                   </td>
                   <td className="px-4 py-2">
                     {c.conversation_id ? (
@@ -233,10 +243,18 @@ function FilterToggle({
 }
 
 /** Data da próxima ação, destacada quando já passou do horário marcado. */
-function NextAction({ at, note }: { at: string | null; note: string | null }) {
+function NextAction({
+  at,
+  note,
+  now,
+}: {
+  at: string | null;
+  note: string | null;
+  now: number | null;
+}) {
   if (!at) return <span className="text-muted-foreground/50">—</span>;
 
-  const overdue = new Date(at).getTime() <= Date.now();
+  const overdue = now !== null && new Date(at).getTime() <= now;
 
   return (
     <span className={cn("text-xs", overdue ? "font-medium text-amber-300" : "text-muted-foreground")}>

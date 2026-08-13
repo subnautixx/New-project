@@ -1,4 +1,5 @@
 import { EmptyState } from "@/components/ui/misc";
+import { cn } from "@/lib/utils";
 import { formatTime } from "@/lib/format";
 import type { MetricsSummaryRow } from "@/lib/types/database";
 
@@ -46,7 +47,14 @@ export function TeamRanking({ rows }: { rows: MetricsSummaryRow[] }) {
               <td className="px-3 py-2 text-right">{row.contacts_replied}</td>
               <td className="px-3 py-2 text-right text-muted-foreground">{row.response_rate}%</td>
               <td className="px-3 py-2 text-right">{row.interested_count}</td>
-              <td className="px-3 py-2 text-right font-medium text-primary">
+              <td
+                className={cn(
+                  "px-3 py-2 text-right",
+                  row.consigned_count > 0
+                    ? "font-semibold text-primary"
+                    : "text-muted-foreground/50",
+                )}
+              >
                 {row.consigned_count}
               </td>
               <td className="px-3 py-2 text-right text-muted-foreground">

@@ -35,7 +35,7 @@ export function VolumeChart({
     <div className="space-y-3 rounded-lg border border-border bg-surface p-4">
       <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-xs">
         <span className="flex items-center gap-1.5">
-          <span className="h-2 w-2 rounded-sm bg-primary" />
+          <span className="h-2 w-2 rounded-sm bg-primary/85" />
           <span className="text-muted-foreground">Enviadas</span>
           <span className="font-medium">{totalSent}</span>
         </span>
@@ -51,7 +51,7 @@ export function VolumeChart({
 
       <div className="overflow-x-auto">
         <div
-          className="flex h-36 min-w-full items-end gap-px"
+          className="flex h-36 min-w-full items-stretch gap-[3px]"
           role="img"
           aria-label={`Volume de mensagens por ${granularity === "hour" ? "hora" : "dia"}: ${totalSent} enviadas e ${totalReceived} recebidas.`}
         >
@@ -62,7 +62,9 @@ export function VolumeChart({
             return (
               <div
                 key={bucket.key}
-                className="flex min-w-[10px] flex-1 flex-col justify-end"
+                // h-full é essencial: sem altura resolvida no pai, a altura
+                // percentual da barra vira zero e o gráfico sai vazio.
+                className="flex h-full min-w-[10px] flex-1 flex-col justify-end"
                 title={`${bucket.label} · ${bucket.sent} enviadas, ${bucket.received} recebidas`}
               >
                 <div
@@ -78,7 +80,7 @@ export function VolumeChart({
                   ) : null}
                   {bucket.sent > 0 ? (
                     <div
-                      className="w-full bg-primary"
+                      className="w-full bg-primary/85"
                       style={{ flexGrow: bucket.sent }}
                       aria-hidden
                     />
@@ -89,7 +91,7 @@ export function VolumeChart({
           })}
         </div>
 
-        <div className="mt-1.5 flex min-w-full gap-px">
+        <div className="mt-2 flex min-w-full gap-[3px]">
           {buckets.map((bucket, index) => (
             <span
               key={bucket.key}

@@ -54,7 +54,7 @@ export const STATUS_DOT: Record<LeadStatus, string> = {
   negociacao: "bg-orange-400",
   consignado: "bg-emerald-400",
   perdido: "bg-red-400",
-  sem_resposta: "bg-zinc-600",
+  sem_resposta: "bg-zinc-500",
 };
 
 export function statusLabel(status: LeadStatus): string {

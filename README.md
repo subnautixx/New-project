@@ -283,9 +283,16 @@ inbox e a página do cliente. Ele busca os dados ao abrir em vez de recebê-los
 por prop: as duas telas carregam recortes diferentes do registro, e salvar em
 cima de um estado parcial apagaria campo que a tela de origem não conhecia.
 
-**Status como ponto na lista, badge na ficha.** Onde a densidade importa, um
-ponto de 6px carrega a mesma informação que um badge sem competir com o nome do
-cliente. Na ficha, onde há espaço, o rótulo aparece por extenso.
+**Status como ponto colorido nas listas, badge só na ficha.** Onde há muitas
+linhas — inbox e lista de clientes —, um badge por linha vira parede de cor e
+nada se destaca. O ponto de 6px carrega a mesma informação e deixa o nome do
+cliente ser o elemento dominante. Na ficha, onde existe uma única ocorrência, o
+badge volta.
+
+**O acento âmbar é raro de propósito.** Ele marca ação primária, seleção e
+consignação — o resultado que a operação persegue. Quando passou a cobrir metade
+do gráfico de volume, perdeu o significado; hoje as barras usam o tom atenuado e
+o âmbar cheio fica para o que precisa ser notado.
 
 ---
 
