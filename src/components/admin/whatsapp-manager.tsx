@@ -1,7 +1,9 @@
 "use client";
 
+import { BookOpen } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { useState } from "react";
+import { WhatsappSetupGuide } from "@/components/admin/whatsapp-setup-guide";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
@@ -49,6 +51,7 @@ export function WhatsappManager({
   permissions: Permission[];
 }) {
   const router = useRouter();
+  const [guideOpen, setGuideOpen] = useState(false);
 
   async function disconnect(account: WhatsappAccountRow) {
     if (
@@ -73,14 +76,26 @@ export function WhatsappManager({
 
   return (
     <div className="mx-auto max-w-4xl space-y-4 p-4 sm:p-6">
-      <div className="flex justify-end">
+      <div className="flex justify-end gap-2">
+        <Button variant="outline" size="sm" onClick={() => setGuideOpen(true)}>
+          <BookOpen className="h-3.5 w-3.5" />
+          Como conectar
+        </Button>
         <NewAccountDialog users={users} onCreated={() => router.refresh()} />
       </div>
+
+      <WhatsappSetupGuide open={guideOpen} onOpenChange={setGuideOpen} />
 
       {accounts.length === 0 ? (
         <EmptyState
           title="Nenhum número conectado"
-          description="Conecte o número da loja para começar a atender pelo CRM."
+          description="Conecte o número da loja para começar a atender pelo CRM. São cinco passos, e a maior parte acontece no painel da Meta."
+          action={
+            <Button variant="outline" size="sm" onClick={() => setGuideOpen(true)}>
+              <BookOpen className="h-3.5 w-3.5" />
+              Ver o passo a passo
+            </Button>
+          }
         />
       ) : (
         <ul className="space-y-2">

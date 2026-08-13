@@ -265,6 +265,12 @@ propósito, já que o endpoint é público.
 Cada número é cadastrado pela tela **WhatsApps**, com o `phone_number_id` e o
 token de acesso do painel da Meta.
 
+O mesmo roteiro está dentro do produto: na tela **WhatsApps**, o botão **Como
+conectar** abre um passo a passo de cinco telas — pré-requisitos, onde achar
+cada identificador, o cadastro aqui, o webhook (com a URL de callback pronta
+para copiar, montada a partir do domínio em que a aplicação está rodando) e o
+teste final. Quem opera a loja não precisa deste README.
+
 ---
 
 ## Verificação

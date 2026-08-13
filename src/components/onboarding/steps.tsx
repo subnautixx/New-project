@@ -257,6 +257,12 @@ export const TOUR_STEPS: TourStep[] = [
           <strong className="text-foreground">WhatsApps</strong> conecta os números, e em{" "}
           <strong className="text-foreground">Auditoria</strong> vê quem fez o quê.
         </p>
+        <p>
+          Conectar o número é a única parte que depende do painel da Meta. A tela{" "}
+          <strong className="text-foreground">WhatsApps</strong> tem um{" "}
+          <strong className="text-foreground">Como conectar</strong> com o passo a passo completo,
+          incluindo o webhook — sem ele, a resposta do cliente não chega.
+        </p>
       </>
     ),
   },
