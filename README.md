@@ -157,6 +157,24 @@ Depois crie o primeiro administrador:
 
 A partir daí todos os outros usuários são criados pela tela **Equipe**.
 
+### Dados de demonstração
+
+A inbox é o coração do sistema e, vazia, não diz nada sobre a experiência.
+Antes de existir integração com a Meta, rode `supabase/seed/demo.sql` no SQL
+Editor: ele cria quatro consignadores, dois números (um compartilhado e um
+individual), 22 prospects e 77 mensagens distribuídas pelo funil.
+
+Os consignadores entram com a senha `demo4fmotors`. Entrar como um deles é a
+forma mais direta de conferir que a RLS funciona: você vê apenas os clientes
+daquele vendedor, mesmo sendo o mesmo banco.
+
+Para remover tudo: `supabase/seed/demo_cleanup.sql`. Ele reconhece o que apagar
+pelos telefones da faixa `+55 11 9000-00xx` e pelos e-mails
+`@demo.4fmotors.local`, então é seguro rodar com dados reais no banco.
+
+O seed não cadastra tokens da Meta — enviar mensagem responde "número sem
+credenciais válidas", que é o comportamento correto.
+
 > Desative o signup público em **Authentication · Providers**. O acesso é
 > restrito à equipe e todo usuário nasce como consignador.
 
@@ -179,9 +197,20 @@ token de acesso do painel da Meta.
 ## Verificação
 
 ```bash
-npm run check   # typecheck + lint + testes
+npm run check       # typecheck + lint + testes
 npm run build
+npm run db:verify   # migrations, RLS e métricas num Postgres descartável
 ```
+
+`db:verify` sobe um Postgres temporário, recria o que o Supabase fornece
+pronto (`supabase/local/supabase-stub.sql`), aplica todas as migrations e então
+**exercita** a segurança em vez de apenas ler as policies: entra como
+consignador e confere que ele vê só os clientes dele, que os tokens da Meta são
+inacessíveis, que escalonamento de papel e transferência são recusados, e que o
+comparativo da equipe só responde ao admin.
+
+Isso vale porque policy, trigger e função de métrica não têm como falhar em
+tempo de compilação — só quando executadas.
 
 Os testes cobrem a lógica que quebra silenciosamente em produção: normalização
 de telefone brasileiro (o nono dígito que a Meta às vezes omite), conversão de
@@ -212,7 +241,12 @@ src/
     audio/        remux WebM -> Ogg para as gravações do navegador
     data/         consultas e métricas
     domain/       funil de status
-supabase/migrations/
+supabase/
+  migrations/   schema, RLS, guards e métricas
+  seed/         dados de demonstração e limpeza
+  local/        stub do Supabase para verificação offline
+scripts/
+  verify-db.sh  aplica as migrations e exercita a RLS
 ```
 
 ---
