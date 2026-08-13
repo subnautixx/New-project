@@ -50,7 +50,7 @@ export function AppSidebar({ profile }: { profile: SessionProfile }) {
   return (
     // Rail de ícones no celular, coluna completa a partir de lg.
     <aside className="flex w-14 shrink-0 flex-col border-r border-border bg-surface lg:w-52">
-      <div className="flex h-14 items-center justify-center border-b border-border px-3 lg:justify-start">
+      <div className="flex h-14 shrink-0 items-center justify-center border-b border-border px-3 lg:justify-start">
         <span className="lg:hidden">
           <Logo compact />
         </span>
@@ -59,7 +59,7 @@ export function AppSidebar({ profile }: { profile: SessionProfile }) {
         </span>
       </div>
 
-      <nav className="flex-1 space-y-0.5 overflow-y-auto p-2">
+      <nav className="flex-1 space-y-0.5 overflow-y-auto px-2 py-3">
         {items.map((item) => {
           const active = pathname === item.href || pathname.startsWith(`${item.href}/`);
           const Icon = item.icon;
@@ -71,14 +71,19 @@ export function AppSidebar({ profile }: { profile: SessionProfile }) {
               title={item.label}
               aria-current={active ? "page" : undefined}
               className={cn(
-                "flex h-9 items-center gap-3 rounded-md px-2.5 text-sm transition-colors",
+                "relative flex h-9 items-center gap-3 rounded-lg px-2.5 text-[13px] transition-colors",
                 "justify-center lg:justify-start",
                 active
                   ? "bg-secondary font-medium text-foreground"
-                  : "text-muted-foreground hover:bg-secondary/60 hover:text-foreground",
+                  : "text-muted-foreground hover:bg-secondary/50 hover:text-foreground",
               )}
             >
-              <Icon className="h-4 w-4 shrink-0" />
+              {/* Barra de acento: a seção ativa se acha de relance, mesmo no
+                  rail estreito onde o rótulo não aparece. */}
+              {active ? (
+                <span className="absolute -left-2 top-1/2 h-5 w-[3px] -translate-y-1/2 rounded-r-full bg-primary" />
+              ) : null}
+              <Icon className={cn("h-4 w-4 shrink-0", active && "text-primary")} />
               <span className="hidden lg:inline">{item.label}</span>
             </Link>
           );
@@ -86,13 +91,15 @@ export function AppSidebar({ profile }: { profile: SessionProfile }) {
       </nav>
 
       <div className="border-t border-border p-2">
-        <div className="flex items-center gap-2 rounded-md px-1 py-1.5">
+        <div className="flex items-center gap-2 rounded-lg px-1 py-1.5">
           <Avatar className="h-7 w-7">
-            <AvatarFallback>{initials(profile.full_name)}</AvatarFallback>
+            <AvatarFallback className="bg-primary/15 text-[10px] font-semibold text-primary">
+              {initials(profile.full_name)}
+            </AvatarFallback>
           </Avatar>
           <div className="hidden min-w-0 flex-1 lg:block">
-            <p className="truncate text-xs font-medium">{profile.full_name}</p>
-            <p className="truncate text-[11px] text-muted-foreground">
+            <p className="truncate text-xs font-medium leading-4">{profile.full_name}</p>
+            <p className="truncate text-[11px] leading-4 text-muted-foreground">
               {isAdmin ? "Administrador" : "Consignador"}
             </p>
           </div>

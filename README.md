@@ -99,6 +99,18 @@ A cópia fica no bucket privado, então o histórico continua legível depois qu
 mídia expira do lado da Meta. Tipo e tamanho são validados antes do upload,
 com os mesmos limites da Cloud API.
 
+### Gravação de áudio
+
+O Chrome só grava em WebM, contêiner que a Cloud API não aceita — e áudio é
+metade da prospecção por WhatsApp no Brasil, então não dava para deixar de fora.
+
+A saída não foi carregar um transcodificador no navegador: WebM/Opus e Ogg/Opus
+carregam os **mesmos pacotes Opus**, só mudam a embalagem. O CRM lê os blocos do
+WebM e reescreve num contêiner Ogg (`lib/audio/`). Sem recodificar, sem perda de
+qualidade, sem dependência nova — e o áudio sai no formato nativo do WhatsApp.
+
+Firefox e Safari já gravam em formato aceito; nesses o remux nem acontece.
+
 ### Regras da Meta são respeitadas, não contornadas
 
 Fora da janela de 24 horas o envio comum é **bloqueado** com explicação na
@@ -171,7 +183,8 @@ Os testes cobrem a lógica que quebra silenciosamente em produção: normalizaç
 de telefone brasileiro (o nono dígito que a Meta às vezes omite), conversão de
 fuso, verificação de assinatura, parsing de webhook, ordenação de status,
 avanço de funil, períodos e buckets de métrica, validação de mídia, variáveis
-de template e rate limit.
+de template, rate limit e o remux de áudio — este último com round-trip, que
+remonta os pacotes a partir do Ogg gerado e confere byte a byte.
 
 ---
 
@@ -192,6 +205,7 @@ src/
   lib/
     supabase/     clientes: sessão (RLS), navegador e service_role
     whatsapp/     Cloud API, webhook, ingestão, status
+    audio/        remux WebM -> Ogg para as gravações do navegador
     data/         consultas e métricas
     domain/       funil de status
 supabase/migrations/
@@ -221,6 +235,14 @@ adicionar tema claro é redefinir variáveis, sem tocar em componente.
 pergunta que ele responde — em que horário a equipe trabalha e onde estão os
 buracos — se resolve com altura relativa; eixo, grade e tooltip só somariam
 ruído e peso ao bundle.
+
+**Remux em vez de transcodificação.** Trocar o contêiner do áudio custa
+~300 linhas testadas; `ffmpeg.wasm` custaria alguns megabytes no bundle e uma
+espera visível a cada gravação, para um resultado idêntico.
+
+**Status como ponto na lista, badge na ficha.** Onde a densidade importa, um
+ponto de 6px carrega a mesma informação que um badge sem competir com o nome do
+cliente. Na ficha, onde há espaço, o rótulo aparece por extenso.
 
 ---
 

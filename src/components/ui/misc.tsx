@@ -57,12 +57,18 @@ export function EmptyState({
   action?: React.ReactNode;
 }) {
   return (
-    <div className="flex h-full flex-col items-center justify-center gap-3 px-6 py-16 text-center">
-      {icon ? <div className="text-muted-foreground/60">{icon}</div> : null}
-      <div className="space-y-1">
+    <div className="flex h-full flex-col items-center justify-center gap-4 px-6 py-16 text-center">
+      {icon ? (
+        <div className="flex h-12 w-12 items-center justify-center rounded-full bg-surface-muted text-muted-foreground/70">
+          {icon}
+        </div>
+      ) : null}
+      <div className="space-y-1.5">
         <p className="text-sm font-medium text-foreground">{title}</p>
         {description ? (
-          <p className="max-w-sm text-sm text-muted-foreground">{description}</p>
+          <p className="max-w-sm text-[13px] leading-relaxed text-muted-foreground">
+            {description}
+          </p>
         ) : null}
       </div>
       {action}

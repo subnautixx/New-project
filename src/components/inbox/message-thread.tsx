@@ -2,11 +2,14 @@
 
 import { ArrowLeft, Info, Loader2 } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
+import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { Button } from "@/components/ui/button";
 import { EmptyState } from "@/components/ui/misc";
+import { STATUS_DOT, STATUS_LABEL } from "@/lib/domain/lead";
 import { dayKey, formatDayDivider } from "@/lib/format";
 import { createSupabaseBrowserClient } from "@/lib/supabase/client";
 import type { ConversationListItem, ThreadMessage, UserRef } from "@/lib/types/views";
+import { cn, initials } from "@/lib/utils";
 import { Composer } from "./composer";
 import { MessageBubble } from "./message-bubble";
 
@@ -89,20 +92,36 @@ export function MessageThread({
 
   return (
     <section className="flex h-full min-w-0 flex-col">
-      <header className="flex h-14 shrink-0 items-center gap-2 border-b border-border px-3">
+      <header className="flex h-14 shrink-0 items-center gap-2.5 border-b border-border bg-surface/50 px-3 backdrop-blur">
         <Button variant="ghost" size="icon-sm" onClick={onBack} className="md:hidden">
           <ArrowLeft className="h-4 w-4" />
           <span className="sr-only">Voltar</span>
         </Button>
 
+        <Avatar className="h-8 w-8 shrink-0">
+          <AvatarFallback className="bg-surface-muted text-[11px] font-semibold text-muted-foreground">
+            {initials(conversation.contact.full_name)}
+          </AvatarFallback>
+        </Avatar>
+
         <div className="min-w-0 flex-1">
-          <p className="truncate text-sm font-medium">{conversation.contact.full_name}</p>
-          <p className="truncate text-xs text-muted-foreground">
-            {conversation.account
-              ? `${conversation.account.display_name}${
-                  conversation.account.mode === "shared" ? " · compartilhado" : ""
-                }`
-              : "Sem número associado"}
+          <p className="truncate text-[13px] font-semibold leading-5">
+            {conversation.contact.full_name}
+          </p>
+          <p className="flex items-center gap-1.5 truncate text-[11px] leading-4 text-muted-foreground">
+            <span
+              className={cn("h-1.5 w-1.5 shrink-0 rounded-full", STATUS_DOT[conversation.contact.status])}
+            />
+            {STATUS_LABEL[conversation.contact.status]}
+            {conversation.account ? (
+              <>
+                <span className="text-muted-foreground/40">·</span>
+                <span className="truncate">
+                  {conversation.account.display_name}
+                  {conversation.account.mode === "shared" ? " (compartilhado)" : ""}
+                </span>
+              </>
+            ) : null}
           </p>
         </div>
 
@@ -137,7 +156,7 @@ export function MessageThread({
                 <div key={message.id} className="contents">
                   {currentDay !== previousDay ? (
                     <div className="my-2 flex justify-center">
-                      <span className="rounded-md bg-surface px-2 py-0.5 text-[11px] text-muted-foreground ring-1 ring-inset ring-border">
+                      <span className="rounded-full bg-surface/90 px-2.5 py-1 text-[10px] font-medium uppercase tracking-wide text-muted-foreground ring-1 ring-inset ring-border backdrop-blur">
                         {formatDayDivider(message.wa_timestamp ?? message.created_at)}
                       </span>
                     </div>

@@ -16,17 +16,26 @@ export function Stat({
   emphasis?: boolean;
 }) {
   return (
-    <div className="min-w-0 rounded-lg border border-border bg-surface px-3 py-2.5">
-      <p className="truncate text-[11px] uppercase tracking-wide text-muted-foreground">{label}</p>
+    <div
+      className={cn(
+        "min-w-0 rounded-xl border bg-surface px-3.5 py-3 transition-colors",
+        emphasis ? "border-primary/25 bg-primary/[0.04]" : "border-border",
+      )}
+    >
+      <p className="truncate text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
+        {label}
+      </p>
       <p
         className={cn(
-          "mt-1 text-xl font-semibold leading-none",
+          "mt-1.5 text-2xl font-semibold leading-none tracking-tight tabular-nums",
           emphasis ? "text-primary" : "text-foreground",
         )}
       >
         {value}
       </p>
-      {hint ? <p className="mt-1 truncate text-[11px] text-muted-foreground">{hint}</p> : null}
+      {hint ? (
+        <p className="mt-1.5 truncate text-[11px] leading-4 text-muted-foreground">{hint}</p>
+      ) : null}
     </div>
   );
 }

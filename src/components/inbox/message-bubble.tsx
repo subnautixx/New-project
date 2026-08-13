@@ -42,7 +42,7 @@ function MediaContent({ message }: { message: ThreadMessage }) {
         <img
           src={src}
           alt={message.content ?? "Imagem recebida"}
-          className="max-h-72 w-auto rounded-md object-contain"
+          className="max-h-80 w-auto rounded-lg object-contain"
           loading="lazy"
         />
       );
@@ -50,8 +50,8 @@ function MediaContent({ message }: { message: ThreadMessage }) {
     case "audio":
       return (
         <span className="flex items-center gap-2">
-          <Mic className="h-4 w-4 shrink-0 opacity-70" />
-          <audio controls preload="none" src={src} className="h-8 max-w-[240px]">
+          <Mic className="h-4 w-4 shrink-0 opacity-60" />
+          <audio controls preload="none" src={src} className="h-9 w-[240px] max-w-full">
             <track kind="captions" />
           </audio>
         </span>
@@ -59,7 +59,7 @@ function MediaContent({ message }: { message: ThreadMessage }) {
 
     case "video":
       return (
-        <video controls preload="metadata" src={src} className="max-h-72 rounded-md">
+        <video controls preload="metadata" src={src} className="max-h-80 rounded-lg">
           <track kind="captions" />
           <Video className="h-4 w-4" />
         </video>
@@ -71,10 +71,12 @@ function MediaContent({ message }: { message: ThreadMessage }) {
           href={src}
           target="_blank"
           rel="noreferrer"
-          className="flex items-center gap-2 underline-offset-2 hover:underline"
+          className="flex items-center gap-2.5 rounded-lg bg-black/20 px-2.5 py-2 transition-colors hover:bg-black/30"
         >
-          <FileText className="h-4 w-4 shrink-0 opacity-70" />
-          <span className="truncate">{message.media_filename ?? "Documento"}</span>
+          <FileText className="h-5 w-5 shrink-0 opacity-70" />
+          <span className="truncate underline-offset-2 hover:underline">
+            {message.media_filename ?? "Documento"}
+          </span>
         </a>
       );
 
@@ -99,15 +101,17 @@ export function MessageBubble({
     <div className={cn("flex w-full", outbound ? "justify-end" : "justify-start")}>
       <div
         className={cn(
-          "max-w-[85%] rounded-lg px-3 py-2 text-sm sm:max-w-[70%]",
+          // O canto reto do lado do remetente faz as vezes da "rabicho" do
+          // WhatsApp: indica a direção sem desenhar nada a mais.
+          "max-w-[85%] rounded-2xl px-3 py-2 text-[13px] leading-relaxed shadow-sm sm:max-w-[68%]",
           outbound
-            ? "bg-emerald-900/45 text-foreground ring-1 ring-inset ring-emerald-700/30"
-            : "bg-surface-muted text-foreground ring-1 ring-inset ring-border",
+            ? "rounded-br-md bg-emerald-800/40 text-foreground ring-1 ring-inset ring-emerald-600/25"
+            : "rounded-bl-md bg-surface text-foreground ring-1 ring-inset ring-border",
         )}
       >
         {/* No número compartilhado, saber QUEM respondeu é essencial. */}
         {showSender && outbound && senderName ? (
-          <p className="mb-1 text-[11px] font-medium text-emerald-300/90">{senderName}</p>
+          <p className="mb-0.5 text-[11px] font-semibold text-emerald-300/90">{senderName}</p>
         ) : null}
 
         {hasMedia ? (
@@ -126,8 +130,8 @@ export function MessageBubble({
 
         <div
           className={cn(
-            "mt-1 flex items-center justify-end gap-1 text-[10px]",
-            outbound ? "text-foreground/60" : "text-muted-foreground",
+            "mt-0.5 flex items-center justify-end gap-1 text-[10px] tabular-nums",
+            outbound ? "text-foreground/55" : "text-muted-foreground",
           )}
         >
           <span>{formatTime(message.wa_timestamp ?? message.created_at)}</span>
@@ -135,7 +139,7 @@ export function MessageBubble({
         </div>
 
         {message.status === "failed" ? (
-          <p className="mt-1 text-[11px] text-destructive">
+          <p className="mt-1 border-t border-destructive/20 pt-1 text-[11px] text-destructive">
             {message.error_message ?? statusLabel("failed")}
           </p>
         ) : null}

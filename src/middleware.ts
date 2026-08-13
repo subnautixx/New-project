@@ -46,6 +46,13 @@ export async function middleware(request: NextRequest) {
   const isPublic = PUBLIC_PATHS.some((p) => pathname.startsWith(p));
 
   if (!user && !isPublic) {
+    // Rota de API responde 401. Redirecionar faria o fetch do navegador seguir
+    // para o HTML do login, e o response.json() quebraria com um erro que não
+    // diz nada sobre a sessão ter expirado.
+    if (pathname.startsWith("/api/")) {
+      return NextResponse.json({ error: "unauthorized" }, { status: 401 });
+    }
+
     const url = request.nextUrl.clone();
     url.pathname = "/login";
     url.searchParams.set("next", pathname);

@@ -12,18 +12,28 @@ export default async function LoginPage({
   const { next } = await searchParams;
 
   return (
-    <main className="flex min-h-dvh items-center justify-center px-4 py-12">
-      <div className="w-full max-w-sm space-y-8">
-        <div className="space-y-2">
-          <Logo className="text-lg" />
-          <p className="text-sm text-muted-foreground">
-            Acesso restrito à equipe. Entre com suas credenciais.
+    <main className="relative flex min-h-dvh items-center justify-center overflow-hidden px-4 py-12">
+      {/* Halo único e discreto. Nenhuma outra decoração na tela. */}
+      <div
+        aria-hidden
+        className="pointer-events-none absolute left-1/2 top-0 h-[420px] w-[720px] -translate-x-1/2 -translate-y-1/2 rounded-full bg-primary/[0.07] blur-3xl"
+      />
+
+      <div className="relative w-full max-w-[380px]">
+        <div className="mb-7 space-y-2.5">
+          <Logo className="text-xl" />
+          <p className="text-sm leading-relaxed text-muted-foreground">
+            Acesso restrito à equipe.
+            <br />
+            Entre com suas credenciais para continuar.
           </p>
         </div>
 
-        <LoginForm nextPath={next} />
+        <div className="rounded-xl border border-border bg-surface p-6 shadow-xl shadow-black/20">
+          <LoginForm nextPath={next} />
+        </div>
 
-        <p className="text-xs text-muted-foreground">
+        <p className="mt-5 text-center text-xs text-muted-foreground">
           Perdeu o acesso? Fale com o administrador da 4FMOTORS.
         </p>
       </div>

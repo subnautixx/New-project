@@ -41,6 +41,22 @@ export const STATUS_CLASS: Record<LeadStatus, string> = {
   sem_resposta: "bg-zinc-500/10 text-zinc-400 ring-zinc-500/20",
 };
 
+/**
+ * Ponto colorido do status. Onde a densidade importa — a lista de conversas —
+ * um ponto de 6px carrega a mesma informação que um badge, ocupando um oitavo
+ * do espaço e sem competir com o nome do cliente.
+ */
+export const STATUS_DOT: Record<LeadStatus, string> = {
+  novo: "bg-zinc-400",
+  contatado: "bg-sky-400",
+  respondeu: "bg-cyan-400",
+  interessado: "bg-amber-400",
+  negociacao: "bg-orange-400",
+  consignado: "bg-emerald-400",
+  perdido: "bg-red-400",
+  sem_resposta: "bg-zinc-600",
+};
+
 export function statusLabel(status: LeadStatus): string {
   return STATUS_LABEL[status];
 }
