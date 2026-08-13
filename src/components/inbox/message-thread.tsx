@@ -19,6 +19,7 @@ interface Props {
   conversation: ConversationListItem;
   users: UserRef[];
   isAdmin: boolean;
+  currentUserId: string;
   onBack: () => void;
   onToggleDetails: () => void;
   /** Incrementa quando o realtime avisa que esta conversa mudou. */
@@ -29,6 +30,7 @@ export function MessageThread({
   conversation,
   users,
   isAdmin,
+  currentUserId,
   onBack,
   onToggleDetails,
   refreshToken,
@@ -180,6 +182,7 @@ export function MessageThread({
         conversation={conversation}
         isAdmin={isAdmin}
         users={users}
+        currentUserId={currentUserId}
         onSent={(message) => setMessages((prev) => [...prev, message])}
       />
     </section>

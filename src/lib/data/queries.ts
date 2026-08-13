@@ -27,7 +27,7 @@ const VEHICLE_FIELDS =
   "id, brand, model, version, year, model_year, km, listed_price, listing_url, source_platform, is_primary";
 
 const CONTACT_FIELDS =
-  "id, full_name, phone_e164, status, source_platform, listing_url, notes, next_action_at, next_action_note, last_interaction_at, photo_path, owner_user_id, created_at";
+  "id, full_name, phone_e164, status, source_platform, listing_url, notes, next_action_at, next_action_note, last_interaction_at, photo_path, opt_in_at, opt_in_source, owner_user_id, created_at";
 
 interface RawNested {
   [key: string]: unknown;

@@ -110,6 +110,8 @@ export type ContactRow = {
   next_action_note: string | null;
   last_interaction_at: string | null;
   photo_path: string | null;
+  opt_in_at: string | null;
+  opt_in_source: string | null;
   created_by: string | null;
   created_at: string;
   updated_at: string;
@@ -243,6 +245,17 @@ export type AuditLogRow = {
   created_at: string;
 }
 
+export type QuickReplyRow = {
+  id: string;
+  owner_user_id: string | null;
+  title: string;
+  body: string;
+  shortcut: string | null;
+  created_by: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
 export type MetricsSummaryRow = {
   user_id: string;
   full_name: string | null;
@@ -336,6 +349,10 @@ export interface Database {
         Partial<WebhookEventRow> & { event_key: string; payload: Json }
       >;
       audit_logs: Table<AuditLogRow, Partial<AuditLogRow> & { action: string }>;
+      quick_replies: Table<
+        QuickReplyRow,
+        Partial<QuickReplyRow> & { title: string; body: string }
+      >;
     };
     Views: Record<never, never>;
     Functions: {

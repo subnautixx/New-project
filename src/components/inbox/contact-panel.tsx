@@ -183,6 +183,25 @@ export function ContactPanel({ conversation, users, isAdmin, currentUserId, onCh
             <Field label="Última interação">{formatDate(contact.last_interaction_at)}</Field>
           </div>
 
+          {/* Consentimento: a Meta exige para template de Marketing, e a
+              resposta do próprio cliente é a evidência mais confiável. */}
+          <Field label="Consentimento">
+            {contact.opt_in_at ? (
+              <span className="flex items-center gap-1.5">
+                <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-emerald-400" />
+                <span>
+                  {formatDate(contact.opt_in_at)}
+                  {contact.opt_in_source === "resposta_do_cliente" ? " · respondeu" : ""}
+                </span>
+              </span>
+            ) : (
+              <span className="flex items-center gap-1.5 text-muted-foreground">
+                <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-zinc-500" />
+                Ainda não respondeu
+              </span>
+            )}
+          </Field>
+
           {contact.next_action_at ? (
             <Field label="Próxima ação">
               {formatDateTime(contact.next_action_at)}

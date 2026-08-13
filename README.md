@@ -115,6 +115,40 @@ qualidade, sem dependência nova — e o áudio sai no formato nativo do WhatsAp
 
 Firefox e Safari já gravam em formato aceito; nesses o remux nem acontece.
 
+### Como prospectar dentro das regras
+
+Este é o ponto que mais afeta o uso diário, e vale entender antes de operar.
+
+Abordar o dono de um anúncio é **contato frio**. Pela Meta, isso é template de
+categoria *Marketing*, que **exige opt-in** — e quem publicou no OLX nunca
+consentiu em receber mensagem da 4FMOTORS. Some a isso os tetos por nível
+(começa em 250 clientes únicos por 24h) e a limitação de entrega para quem não
+costuma interagir. Ou seja: o movimento central da operação é justamente o que
+a API oficial torna mais difícil.
+
+**O caminho que funciona é a coexistência:**
+
+1. o consignador abre a conversa **manualmente, pelo WhatsApp Business no
+   celular** — humano, um por vez, sem automação e sem template;
+2. o dono responde;
+3. a conversa entra no CRM pela coexistência e passa a ser atendida pela inbox,
+   dentro da janela de 24h, sem custo de template.
+
+O CRM não é a ferramenta de disparo. Ele é onde a conversa vira cliente
+acompanhado: funil, notas, responsável, próxima ação e métrica. A prospecção
+continua sendo trabalho humano — como já é hoje, só que deixando rastro.
+
+O campo **Consentimento** na ficha registra quando o cliente respondeu pela
+primeira vez. É gravado por trigger, na primeira mensagem recebida, e é a
+evidência que sustenta o uso de template mais adiante.
+
+### Respostas rápidas
+
+Vivem dentro do campo de mensagem, não numa tela de configuração: o consignador
+explica como funciona a consignação dezenas de vezes por dia. O administrador
+cria respostas da loja, visíveis para todos; cada consignador cria as próprias,
+que ninguém mais vê.
+
 ### Foto do cliente
 
 A Cloud API da Meta **não** expõe a foto de perfil de um contato: o webhook

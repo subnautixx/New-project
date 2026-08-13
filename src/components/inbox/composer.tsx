@@ -8,6 +8,7 @@ import { createSupabaseBrowserClient } from "@/lib/supabase/client";
 import type { ConversationListItem, ThreadMessage, UserRef } from "@/lib/types/views";
 import { ACCEPTED_MIME_TYPES, validateMedia } from "@/lib/whatsapp/media";
 import { AudioRecorder } from "./audio-recorder";
+import { QuickReplies } from "./quick-replies";
 import { TemplateDialog } from "./template-dialog";
 
 const MAX_LENGTH = 4096;
@@ -16,6 +17,7 @@ interface Props {
   conversation: ConversationListItem;
   isAdmin: boolean;
   users: UserRef[];
+  currentUserId: string;
   onSent: (message: ThreadMessage) => void;
 }
 
@@ -24,7 +26,7 @@ interface SendResponse {
   error?: string;
 }
 
-export function Composer({ conversation, onSent }: Props) {
+export function Composer({ conversation, isAdmin, currentUserId, onSent }: Props) {
   const [text, setText] = useState("");
   const [file, setFile] = useState<File | null>(null);
   const [sending, setSending] = useState(false);
@@ -254,6 +256,19 @@ export function Composer({ conversation, onSent }: Props) {
           <Paperclip className="h-4 w-4" />
           <span className="sr-only">Anexar arquivo</span>
         </Button>
+
+        <QuickReplies
+          currentUserId={currentUserId}
+          isAdmin={isAdmin}
+          currentText={text}
+          disabled={sending}
+          onInsert={(body) => {
+            // Acrescenta ao que já foi digitado em vez de substituir: o
+            // consignador costuma escrever "Oi João!" antes de colar o padrão.
+            setText((prev) => (prev.trim() ? `${prev.trimEnd()}\n\n${body}` : body));
+            textareaRef.current?.focus();
+          }}
+        />
 
         <AudioRecorder disabled={sending} onRecorded={(f) => void sendRecording(f)} />
 

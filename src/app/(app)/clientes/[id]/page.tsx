@@ -157,6 +157,13 @@ export default async function ContactDetailPage({
               </Field>
               <Field label="Cadastrado em">{formatDate(contact.created_at)}</Field>
               <Field label="Última interação">{formatDate(contact.last_interaction_at)}</Field>
+              <Field label="Consentimento">
+                {contact.opt_in_at
+                  ? `${formatDate(contact.opt_in_at)}${
+                      contact.opt_in_source === "resposta_do_cliente" ? " · respondeu" : ""
+                    }`
+                  : "Ainda não respondeu"}
+              </Field>
 
               {contact.next_action_at ? (
                 <Field label="Próxima ação">

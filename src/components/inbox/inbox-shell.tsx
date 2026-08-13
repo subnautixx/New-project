@@ -122,6 +122,7 @@ export function InboxShell({
             conversation={selected}
             users={users}
             isAdmin={isAdmin}
+            currentUserId={currentUserId}
             onBack={() => setSelectedId(null)}
             onToggleDetails={() => setShowDetails((v) => !v)}
             refreshToken={threadToken}

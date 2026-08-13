@@ -93,6 +93,11 @@ begin
     raise exception 'seed não populou nada';
   end if;
 
+  -- Três respostas rápidas, criadas antes de assumir o papel: uma da loja,
+  -- uma do Breno e uma de outro usuário.
+  insert into public.quick_replies (owner_user_id, title, body)
+  values (null, 'Da loja', 'x'), (v_breno, 'Minha', 'y'), (v_admin, 'De outro', 'z');
+
   -- O consignador enxerga apenas os clientes dele.
   perform set_config('request.jwt.claim.sub', v_breno::text, false);
   set local role authenticated;
@@ -148,7 +153,30 @@ begin
     raise notice 'ok  métricas: comparativo restrito ao admin';
   end;
 
+  -- Respostas rápidas: a da loja é comum, a pessoal é só de quem criou.
+  select count(*) into v_dele from public.quick_replies;
+  if v_dele <> 2 then
+    raise notice 'FALHA: consignador viu % respostas rápidas (esperado 2)', v_dele;
+    v_falhas := v_falhas + 1;
+  else
+    raise notice 'ok  respostas rápidas: vê a da loja e a própria, não a alheia';
+  end if;
+
   reset role;
+
+  -- O opt-in é gravado na primeira resposta do cliente.
+  if not exists (
+    select 1 from public.contacts ct
+    join public.messages m on m.contact_id = ct.id and m.direction = 'inbound'
+    where ct.opt_in_at is not null
+    group by ct.id, ct.opt_in_at
+    having ct.opt_in_at = min(m.wa_timestamp)
+  ) then
+    raise notice 'FALHA: opt-in não corresponde à primeira resposta recebida';
+    v_falhas := v_falhas + 1;
+  else
+    raise notice 'ok  opt-in: gravado na primeira resposta do cliente';
+  end if;
 
   -- O admin enxerga a operação inteira.
   perform set_config('request.jwt.claim.sub', v_admin::text, false);
