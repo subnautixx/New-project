@@ -43,7 +43,10 @@
 
     --radius: 0.5rem;
 
-    --font-sans: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+    /* A pilha do sistema fica de reserva: se a fonte falhar, o texto aparece
+       mesmo assim, só com outro desenho. */
+    --font-sans: var(--font-inter), ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto,
+      sans-serif;
   }
 
   * {

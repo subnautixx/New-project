@@ -20,6 +20,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import { useToast } from "@/components/ui/toast";
 import type { UserRef } from "@/lib/types/views";
 
 /**
@@ -43,6 +44,7 @@ export function TransferDialog({
   users: UserRef[];
   onTransferred?: () => void;
 }) {
+  const toast = useToast();
   const [open, setOpen] = useState(false);
   const [toUserId, setToUserId] = useState<string>("");
   const [reason, setReason] = useState("");
@@ -78,10 +80,15 @@ export function TransferDialog({
       return;
     }
 
+    const recipient = options.find((u) => u.id === toUserId);
+
     setPending(false);
     setOpen(false);
     setReason("");
     setToUserId("");
+    toast.success(
+      recipient ? `Cliente transferido para ${recipient.full_name}.` : "Cliente transferido.",
+    );
     onTransferred?.();
   }
 

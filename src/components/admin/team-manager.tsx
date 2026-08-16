@@ -22,6 +22,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import { useToast } from "@/components/ui/toast";
 import { formatPhone } from "@/lib/phone";
 import type { ProfileRow } from "@/lib/types/database";
 import type { AccountRef } from "@/lib/types/views";
@@ -39,6 +40,7 @@ interface Props {
 
 export function TeamManager({ profiles, accounts, permissions }: Props) {
   const router = useRouter();
+  const toast = useToast();
 
   const accountsOf = (userId: string) =>
     permissions
@@ -55,10 +57,15 @@ export function TeamManager({ profiles, accounts, permissions }: Props) {
 
     if (!response.ok) {
       const payload = (await response.json().catch(() => null)) as { message?: string } | null;
-      alert(payload?.message ?? "Não foi possível alterar o usuário.");
+      toast.error(payload?.message ?? "Não foi possível alterar o usuário.");
       return;
     }
 
+    toast.success(
+      profile.is_active
+        ? `${profile.full_name} foi desativado.`
+        : `${profile.full_name} voltou a ter acesso.`,
+    );
     router.refresh();
   }
 

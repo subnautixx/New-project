@@ -15,6 +15,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
+import { useToast } from "@/components/ui/toast";
 import { SOURCE_PLATFORMS } from "@/lib/domain/lead";
 import { normalizePhone } from "@/lib/phone";
 import { uploadContactPhoto } from "@/lib/contacts/upload-photo";
@@ -36,6 +37,7 @@ export function NewContactForm({
   currentUserId: string;
 }) {
   const router = useRouter();
+  const toast = useToast();
   const [pending, setPending] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [accountId, setAccountId] = useState<string>(accounts[0]?.id ?? NO_ACCOUNT);
@@ -122,6 +124,7 @@ export function NewContactForm({
       });
     }
 
+    toast.success("Cliente cadastrado.");
     router.push(`/clientes/${contact.id}`);
     router.refresh();
   }

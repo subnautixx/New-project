@@ -360,6 +360,21 @@ pergunta que ele responde — em que horário a equipe trabalha e onde estão os
 buracos — se resolve com altura relativa; eixo, grade e tooltip só somariam
 ruído e peso ao bundle.
 
+**Avisos escritos à mão.** O `ToastProvider` são três estados e um
+temporizador. O projeto já carrega Radix e lucide para o resto; uma biblioteca
+de toast a mais não pagaria o próprio peso. O aviso de erro não some sozinho —
+quem precisa ler uma falha decide quando dispensá-la; o de sucesso sai em
+quatro segundos.
+
+**Esqueleto em vez de spinner.** Todas as telas são `force-dynamic` e esperam o
+banco. Cada rota tem um `loading.tsx` que imita o próprio layout: a troca pelo
+conteúdo real não desloca nada, e a espera parece mais curta do que um spinner
+no meio da tela faria parecer.
+
+**Fonte auto-hospedada.** A Inter entra por `next/font`, que baixa os arquivos
+na build e os serve do próprio domínio. Sem requisição ao Google em tempo de
+execução e sem salto de layout quando a fonte carrega.
+
 **Remux em vez de transcodificação.** Trocar o contêiner do áudio custa
 ~300 linhas testadas; `ffmpeg.wasm` custaria alguns megabytes no bundle e uma
 espera visível a cada gravação, para um resultado idêntico.

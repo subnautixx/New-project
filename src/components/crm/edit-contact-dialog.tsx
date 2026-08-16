@@ -25,6 +25,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
+import { useToast } from "@/components/ui/toast";
 import { SOURCE_PLATFORMS } from "@/lib/domain/lead";
 import { normalizePhone } from "@/lib/phone";
 import { uploadContactPhoto } from "@/lib/contacts/upload-photo";
@@ -49,6 +50,7 @@ interface Props {
  */
 export function EditContactDialog({ contactId, compact = false, onSaved }: Props) {
   const router = useRouter();
+  const toast = useToast();
   const [open, setOpen] = useState(false);
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
@@ -180,6 +182,7 @@ export function EditContactDialog({ contactId, compact = false, onSaved }: Props
 
     setSaving(false);
     setOpen(false);
+    toast.success("Cliente atualizado.");
     onSaved?.();
     router.refresh();
   }

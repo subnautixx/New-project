@@ -1,5 +1,17 @@
 import type { Metadata, Viewport } from "next";
+import { Inter } from "next/font/google";
 import "./globals.css";
+
+/**
+ * A fonte é servida pelo próprio domínio — `next/font` baixa e hospeda os
+ * arquivos na build. Nada de requisição para o Google em tempo de execução, e
+ * nenhum salto de layout quando a fonte carrega.
+ */
+const inter = Inter({
+  subsets: ["latin"],
+  display: "swap",
+  variable: "--font-inter",
+});
 
 export const metadata: Metadata = {
   title: {
@@ -18,7 +30,7 @@ export const viewport: Viewport = {
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
-    <html lang="pt-BR" className="dark">
+    <html lang="pt-BR" className={`dark ${inter.variable}`}>
       <body className="min-h-dvh bg-background text-foreground">{children}</body>
     </html>
   );

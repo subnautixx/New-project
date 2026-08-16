@@ -15,6 +15,7 @@ import {
   DialogTitle,
   DialogTrigger,
 } from "@/components/ui/dialog";
+import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import {
@@ -25,6 +26,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { EmptyState } from "@/components/ui/misc";
+import { useToast } from "@/components/ui/toast";
 import { formatPhone } from "@/lib/phone";
 import type { WaAccountStatus, WhatsappAccountRow } from "@/lib/types/database";
 import type { UserRef } from "@/lib/types/views";
@@ -51,26 +53,27 @@ export function WhatsappManager({
   permissions: Permission[];
 }) {
   const router = useRouter();
+  const toast = useToast();
   const [guideOpen, setGuideOpen] = useState(false);
+  const [pendingRemoval, setPendingRemoval] = useState<WhatsappAccountRow | null>(null);
+  const [removing, setRemoving] = useState(false);
 
   async function disconnect(account: WhatsappAccountRow) {
-    if (
-      !confirm(
-        `Remover "${account.display_name}" da operação?\n\nO histórico de conversas é preservado, mas o token de acesso é apagado e não será mais possível enviar por este número.`,
-      )
-    ) {
-      return;
-    }
+    setRemoving(true);
 
     const response = await fetch(`/api/admin/whatsapp-accounts/${account.id}`, {
       method: "DELETE",
     });
 
+    setRemoving(false);
+
     if (!response.ok) {
-      alert("Não foi possível remover o número.");
+      toast.error("Não foi possível remover o número.");
       return;
     }
 
+    setPendingRemoval(null);
+    toast.success(`${account.display_name} foi removido da operação.`);
     router.refresh();
   }
 
@@ -143,7 +146,7 @@ export function WhatsappManager({
                 </div>
 
                 {account.is_active ? (
-                  <Button variant="outline" size="sm" onClick={() => void disconnect(account)}>
+                  <Button variant="outline" size="sm" onClick={() => setPendingRemoval(account)}>
                     Remover
                   </Button>
                 ) : null}
@@ -152,6 +155,27 @@ export function WhatsappManager({
           })}
         </ul>
       )}
+
+      <ConfirmDialog
+        open={pendingRemoval !== null}
+        onOpenChange={(open) => (open ? null : setPendingRemoval(null))}
+        title={`Remover ${pendingRemoval?.display_name ?? ""}?`}
+        confirmLabel="Remover número"
+        pending={removing}
+        onConfirm={() => pendingRemoval && void disconnect(pendingRemoval)}
+        description={
+          <>
+            <p>
+              O histórico de conversas é preservado — nada do que já foi trocado com os clientes
+              se perde.
+            </p>
+            <p>
+              O token de acesso é apagado e não será mais possível enviar por este número. Para
+              voltar a usá-lo, é preciso cadastrar de novo com um token novo.
+            </p>
+          </>
+        }
+      />
 
       <div className="space-y-2 rounded-lg border border-border bg-surface p-4 text-xs text-muted-foreground">
         <p className="font-medium text-foreground">Sobre a integração</p>
