@@ -19,6 +19,10 @@ interface Props {
   users: UserRef[];
   currentUserId: string;
   onSent: (message: ThreadMessage) => void;
+  /** Texto entregue à thread antes da ida ao servidor, para aparecer na hora. */
+  onPending: (clientRef: string, text: string) => void;
+  /** Fim da tentativa, com ou sem sucesso: o balão provisório sai. */
+  onPendingDone: (clientRef: string) => void;
 }
 
 interface SendResponse {
@@ -26,7 +30,14 @@ interface SendResponse {
   error?: string;
 }
 
-export function Composer({ conversation, isAdmin, currentUserId, onSent }: Props) {
+export function Composer({
+  conversation,
+  isAdmin,
+  currentUserId,
+  onSent,
+  onPending,
+  onPendingDone,
+}: Props) {
   const [text, setText] = useState("");
   const [file, setFile] = useState<File | null>(null);
   const [sending, setSending] = useState(false);
@@ -118,11 +129,7 @@ export function Composer({ conversation, isAdmin, currentUserId, onSent }: Props
     return true;
   }
 
-  async function sendText(body: string): Promise<boolean> {
-    // Gerado aqui: se a resposta se perder e o usuário reenviar, o backend
-    // reconhece a mesma tentativa em vez de mandar duas mensagens ao cliente.
-    const clientRef = crypto.randomUUID();
-
+  async function sendText(body: string, clientRef: string): Promise<boolean> {
     const response = await fetch("/api/messages/send", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -152,19 +159,46 @@ export function Composer({ conversation, isAdmin, currentUserId, onSent }: Props
     setSending(true);
     setError(null);
 
-    try {
-      const sent = file ? await uploadAndSend(file, body) : await sendText(body);
-
-      if (sent) {
-        setText("");
-        setFile(null);
-        textareaRef.current?.focus();
+    // Anexo continua esperando a resposta: o upload tem estado próprio na tela,
+    // e um balão provisório sem a mídia carregada só confundiria.
+    if (file) {
+      try {
+        if (await uploadAndSend(file, body)) {
+          setText("");
+          setFile(null);
+          textareaRef.current?.focus();
+        }
+      } catch {
+        setError("Sem conexão com o servidor.");
+      } finally {
+        setSending(false);
       }
+      return;
+    }
+
+    // Gerado aqui: se a resposta se perder e o usuário reenviar, o backend
+    // reconhece a mesma tentativa em vez de mandar duas mensagens ao cliente.
+    const clientRef = crypto.randomUUID();
+
+    // O balão aparece antes da ida ao servidor, e o campo esvazia junto — quem
+    // atende segue escrevendo a próxima linha sem esperar a rede.
+    onPending(clientRef, body);
+    setText("");
+    textareaRef.current?.focus();
+
+    let ok = false;
+    try {
+      ok = await sendText(body, clientRef);
     } catch {
       setError("Sem conexão com o servidor.");
     } finally {
+      onPendingDone(clientRef);
       setSending(false);
     }
+
+    // Falhou: o texto volta para o campo, senão o que a pessoa escreveu some
+    // junto com o balão e ela precisa digitar tudo de novo.
+    if (!ok) setText((current) => (current.length > 0 ? current : body));
   }
 
   /** Áudio gravado vai direto, como no WhatsApp — sem passo de confirmação. */

@@ -1,4 +1,5 @@
 import { AppSidebar } from "@/components/layout/app-sidebar";
+import { RouteTransition } from "@/components/layout/route-transition";
 import { ToastProvider } from "@/components/ui/toast";
 import { requireProfile } from "@/lib/auth/session";
 
@@ -9,7 +10,7 @@ export default async function AppLayout({ children }: { children: React.ReactNod
     <ToastProvider>
       <div className="flex h-dvh overflow-hidden">
         <AppSidebar profile={profile} />
-        <div className="flex min-w-0 flex-1 flex-col">{children}</div>
+        <RouteTransition>{children}</RouteTransition>
       </div>
     </ToastProvider>
   );

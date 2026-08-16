@@ -12,6 +12,7 @@ import type { ConversationListItem, ThreadMessage, UserRef } from "@/lib/types/v
 import { cn } from "@/lib/utils";
 import { Composer } from "./composer";
 import { MessageBubble } from "./message-bubble";
+import { PendingBubble } from "./pending-bubble";
 
 const PAGE_SIZE = 200;
 
@@ -36,6 +37,8 @@ export function MessageThread({
   refreshToken,
 }: Props) {
   const [messages, setMessages] = useState<ThreadMessage[]>([]);
+  /** Mensagens já escritas que ainda estão indo para o servidor. */
+  const [pending, setPending] = useState<{ clientRef: string; text: string }[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const bottomRef = useRef<HTMLDivElement>(null);
@@ -71,6 +74,9 @@ export function MessageThread({
     void load();
   }, [load, refreshToken]);
 
+  // Trocar de conversa não pode levar junto um balão provisório da anterior.
+  useEffect(() => setPending([]), [conversationId]);
+
   // Zera o contador de não lidas ao abrir a conversa.
   useEffect(() => {
     if (conversation.unread_count === 0) return;
@@ -79,7 +85,7 @@ export function MessageThread({
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ block: "end" });
-  }, [messages.length]);
+  }, [messages.length, pending.length]);
 
   const senderName = useCallback(
     (userId: string | null) => {
@@ -141,7 +147,7 @@ export function MessageThread({
           </div>
         ) : error ? (
           <EmptyState title="Erro ao carregar" description={error} />
-        ) : messages.length === 0 ? (
+        ) : messages.length === 0 && pending.length === 0 ? (
           <EmptyState
             title="Nenhuma mensagem ainda"
             description="Envie a primeira mensagem para iniciar o atendimento."
@@ -173,6 +179,11 @@ export function MessageThread({
                 </div>
               );
             })}
+
+            {pending.map((item) => (
+              <PendingBubble key={item.clientRef} text={item.text} />
+            ))}
+
             <div ref={bottomRef} />
           </div>
         )}
@@ -184,7 +195,12 @@ export function MessageThread({
         users={users}
         currentUserId={currentUserId}
         onSent={(message) => setMessages((prev) => [...prev, message])}
+        onPending={(clientRef, text) => setPending((prev) => [...prev, { clientRef, text }])}
+        onPendingDone={(clientRef) =>
+          setPending((prev) => prev.filter((p) => p.clientRef !== clientRef))
+        }
       />
     </section>
   );
 }
+
