@@ -214,5 +214,32 @@ $PSQL -f "$ROOT/supabase/seed/demo_cleanup.sql" >/dev/null 2>&1
 $PSQL -tc "select case when count(*) = 0 then '   ok  seed removido por completo'
   else '   FALHA: sobraram ' || count(*) || ' clientes' end from public.contacts;"
 
+# A trava do seed só vale se ela realmente recusar. Cria um cliente com telefone
+# fora da faixa de demonstração e confere que o seed se nega a rodar.
+# Instalação nova: banco vazio, tutorial pendente e nada de dado de demonstração.
+echo "→ loja recém instalada"
+$PSQL -tc "select case
+  when (select count(*) from public.contacts) = 0
+   and (select count(*) from public.conversations) = 0
+   and (select count(*) from public.messages) = 0
+   and (select count(*) from public.whatsapp_accounts) = 0
+  then '   ok  banco limpo: nenhum dado de demonstração sobrou'
+  else '   FALHA: sobrou dado no banco' end;"
+
+$PSQL -tc "select case when count(*) = (select count(*) from public.profiles)
+  then '   ok  tutorial pendente para todo usuário novo'
+  else '   FALHA: algum perfil nasceu com o tutorial concluído' end
+  from public.profiles where onboarding_completed_at is null;"
+
+echo "→ trava do seed em banco com dado real"
+$PSQL -c "insert into public.contacts (full_name, phone_e164, owner_user_id)
+  select 'Cliente Real', '+5511988887777', id from public.profiles where role = 'admin' limit 1;" >/dev/null
+
+if $PSQL -f "$ROOT/supabase/seed/demo.sql" >/dev/null 2>&1; then
+  echo "   FALHA: o seed rodou em um banco com cliente real"
+  exit 1
+fi
+echo "   ok  seed recusado em banco com cliente real"
+
 echo
 echo "Banco verificado."

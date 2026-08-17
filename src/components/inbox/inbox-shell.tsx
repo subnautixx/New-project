@@ -3,6 +3,7 @@
 import { MessagesSquare } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useRef, useState } from "react";
+import { FirstSteps, type FirstStepsState } from "@/components/onboarding/first-steps";
 import { EmptyState } from "@/components/ui/misc";
 import { createSupabaseBrowserClient } from "@/lib/supabase/client";
 import type { ConversationListItem, UserRef } from "@/lib/types/views";
@@ -18,6 +19,8 @@ interface Props {
   currentUserId: string;
   /** Conversa vinda de `?c=` — permite linkar direto de Clientes para o atendimento. */
   initialConversationId?: string | null;
+  /** Só vem preenchido quando não há conversa nenhuma: o que falta configurar. */
+  firstSteps?: FirstStepsState | null;
 }
 
 /** Espera antes de recarregar a lista: numa rajada de mensagens, uma ida só. */
@@ -29,6 +32,7 @@ export function InboxShell({
   isAdmin,
   currentUserId,
   initialConversationId,
+  firstSteps,
 }: Props) {
   const router = useRouter();
   const [selectedId, setSelectedId] = useState<string | null>(() => {
@@ -127,6 +131,10 @@ export function InboxShell({
             onToggleDetails={() => setShowDetails((v) => !v)}
             refreshToken={threadToken}
           />
+        ) : firstSteps ? (
+          // Loja recém instalada: pedir para "selecionar uma conversa" quando não
+          // existe nenhuma é um beco sem saída.
+          <FirstSteps state={firstSteps} isAdmin={isAdmin} />
         ) : (
           <EmptyState
             icon={<MessagesSquare className="h-8 w-8" />}

@@ -17,6 +17,25 @@
 -- Para remover tudo depois: supabase/seed/demo_cleanup.sql
 -- =============================================================================
 
+-- Trava de segurança: recusa rodar em um banco que já tem cliente de verdade.
+-- Dado de demonstração misturado com operação real é caro de separar depois —
+-- os telefones se parecem, e o `demo_cleanup.sql` só reconhece a faixa falsa.
+do $$
+declare
+  v_reais integer;
+begin
+  select count(*) into v_reais
+  from public.contacts
+  where phone_e164 not like '+55119000000%';
+
+  if v_reais > 0 then
+    raise exception
+      'Este banco já tem % cliente(s) real(is). O seed de demonstração foi recusado.', v_reais
+      using hint = 'Rode isto apenas em um projeto de teste, nunca no da loja.';
+  end if;
+end;
+$$;
+
 -- Cria um usuário de autenticação. Temporária: some ao fim da sessão.
 create or replace function pg_temp.demo_user(p_email text, p_name text)
 returns uuid

@@ -230,7 +230,28 @@ Depois crie o primeiro administrador:
 
 A partir daí todos os outros usuários são criados pela tela **Equipe**.
 
+### Instalação limpa
+
+O sistema entra em operação com o banco vazio — nada de dado de demonstração é
+necessário, e nenhum é criado sozinho. Só as migrations rodam.
+
+No primeiro acesso, cada usuário recebe o **tutorial** automaticamente (o
+administrador ganha um passo a mais, sobre o que só ele administra). Depois de
+fechá-lo, a inbox não pede para "selecionar uma conversa" que não existe: ela
+mostra o que falta configurar, na ordem — conectar o número, cadastrar a
+equipe, cadastrar o primeiro cliente. Cada item é marcado a partir do estado
+real do banco, então remover o último número faz o passo voltar.
+
+Quando tudo está configurado e ainda não há conversa, a tela diz isso com todas
+as letras: a primeira mensagem para o dono do anúncio sai do celular, e a
+conversa aparece aqui quando ele responder.
+
 ### Dados de demonstração
+
+> Opcional, e só para avaliar a interface. **Nunca rode isto no banco da
+> loja.** O `demo.sql` se recusa a rodar se encontrar qualquer cliente fora da
+> faixa de telefones de demonstração — a trava é verificada em `npm run
+> db:verify`.
 
 A inbox é o coração do sistema e, vazia, não diz nada sobre a experiência.
 Antes de existir integração com a Meta, rode `supabase/seed/demo.sql` no SQL

@@ -241,3 +241,34 @@ export async function fetchAccessibleAccounts(supabase: Client): Promise<Account
 function escapeLike(value: string): string {
   return value.replace(/[%_\\]/g, "\\$&").replace(/,/g, " ");
 }
+
+/**
+ * O que já existe na loja, para o painel de primeiros passos.
+ *
+ * Passa pela RLS como todo o resto: o consignador só conta os números que
+ * pode usar e os clientes que são dele. Se ele não enxerga número nenhum, o
+ * passo continua pendente para ele — que é a verdade do ponto de vista dele.
+ *
+ * `head: true` traz só a contagem, sem as linhas.
+ */
+export async function fetchFirstStepsState(supabase: Client): Promise<{
+  hasWhatsapp: boolean;
+  hasTeam: boolean;
+  hasContacts: boolean;
+}> {
+  const [accounts, profiles, contacts] = await Promise.all([
+    supabase
+      .from("whatsapp_accounts")
+      .select("id", { count: "exact", head: true })
+      .eq("is_active", true),
+    supabase.from("profiles").select("id", { count: "exact", head: true }).eq("is_active", true),
+    supabase.from("contacts").select("id", { count: "exact", head: true }),
+  ]);
+
+  return {
+    hasWhatsapp: (accounts.count ?? 0) > 0,
+    // O próprio administrador já conta como um perfil: equipe começa no segundo.
+    hasTeam: (profiles.count ?? 0) > 1,
+    hasContacts: (contacts.count ?? 0) > 0,
+  };
+}
