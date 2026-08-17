@@ -17,10 +17,40 @@ const serverSchema = z.object({
   META_GRAPH_API_VERSION: z.string().default("v21.0"),
 });
 
-export const publicEnv = publicSchema.parse({
-  NEXT_PUBLIC_SUPABASE_URL: process.env.NEXT_PUBLIC_SUPABASE_URL,
-  NEXT_PUBLIC_SUPABASE_ANON_KEY: process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY,
-});
+let cachedPublicEnv: z.infer<typeof publicSchema> | null = null;
+
+/**
+ * Lê as variáveis públicas sob demanda.
+ *
+ * Já foi validação no topo do módulo, e isso acoplava a BUILD à configuração
+ * de runtime: `next build` importa cada rota para coletar dados, o parse
+ * rodava ali e o build inteiro morria com "Failed to collect page data for
+ * /api/admin/users" — uma mensagem que não diz que faltou variável.
+ *
+ * Agora o build passa e a falta só aparece na primeira requisição, dizendo
+ * qual variável falta. Vale lembrar que `NEXT_PUBLIC_*` é substituída no
+ * bundle durante a build: para o navegador funcionar, elas precisam existir
+ * no momento em que a build roda, não só em execução.
+ */
+export function publicEnv(): z.infer<typeof publicSchema> {
+  if (cachedPublicEnv) return cachedPublicEnv;
+
+  const parsed = publicSchema.safeParse({
+    NEXT_PUBLIC_SUPABASE_URL: process.env.NEXT_PUBLIC_SUPABASE_URL,
+    NEXT_PUBLIC_SUPABASE_ANON_KEY: process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY,
+  });
+
+  if (!parsed.success) {
+    throw new Error(
+      `Configuração de ambiente inválida: ${parsed.error.issues
+        .map((i) => i.path.join("."))
+        .join(", ")}`,
+    );
+  }
+
+  cachedPublicEnv = parsed.data;
+  return cachedPublicEnv;
+}
 
 let cachedServerEnv: z.infer<typeof serverSchema> | null = null;
 
