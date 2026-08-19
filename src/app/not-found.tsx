@@ -10,7 +10,7 @@ export default function NotFound() {
       <p className="mt-8 font-mono text-xs uppercase tracking-[0.2em] text-muted-foreground">
         404
       </p>
-      <h1 className="mt-2 text-xl font-semibold tracking-tight">Esta página não existe</h1>
+      <h1 className="mt-2 font-display text-xl font-semibold tracking-[-0.01em]">Esta página não existe</h1>
       <p className="mt-2 max-w-sm text-sm leading-relaxed text-muted-foreground">
         O endereço pode ter mudado, ou o cliente que você procura foi transferido para outro
         consignador.

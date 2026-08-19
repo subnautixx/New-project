@@ -1,16 +1,33 @@
 import type { Metadata, Viewport } from "next";
-import { Inter } from "next/font/google";
+import { Archivo, Inter } from "next/font/google";
 import "./globals.css";
 
 /**
- * A fonte é servida pelo próprio domínio — `next/font` baixa e hospeda os
- * arquivos na build. Nada de requisição para o Google em tempo de execução, e
- * nenhum salto de layout quando a fonte carrega.
+ * Duas fontes, com papéis separados.
+ *
+ * Inter carrega a interface: lista, tabela, formulário, corpo. É neutra de
+ * propósito — numa ferramenta olhada oito horas por dia, o texto não deve
+ * chamar atenção para si.
+ *
+ * Archivo carrega a marca e os títulos de tela. É uma grotesca estreita, de
+ * aberturas fechadas, com o desenho de letreiro de concessionária e de placa —
+ * o mundo do próprio negócio. Usada só em display e com entrelinha apertada,
+ * ela dá identidade sem custar legibilidade onde a legibilidade importa.
+ *
+ * As duas são baixadas e hospedadas pelo `next/font` durante a build: nada de
+ * requisição ao Google em execução, e nenhum salto de layout.
  */
 const inter = Inter({
   subsets: ["latin"],
   display: "swap",
   variable: "--font-inter",
+});
+
+const archivo = Archivo({
+  subsets: ["latin"],
+  display: "swap",
+  weight: ["600", "700"],
+  variable: "--font-archivo",
 });
 
 export const metadata: Metadata = {
@@ -30,7 +47,7 @@ export const viewport: Viewport = {
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
-    <html lang="pt-BR" className={`dark ${inter.variable}`}>
+    <html lang="pt-BR" className={`dark ${inter.variable} ${archivo.variable}`}>
       <body className="min-h-dvh bg-background text-foreground">{children}</body>
     </html>
   );

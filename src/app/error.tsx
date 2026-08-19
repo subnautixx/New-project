@@ -31,7 +31,7 @@ export default function AppError({
     <main className="flex min-h-dvh flex-col items-center justify-center px-6 py-12 text-center">
       <Logo className="text-lg" />
 
-      <h1 className="mt-8 text-xl font-semibold tracking-tight">Algo saiu do lugar</h1>
+      <h1 className="mt-8 font-display text-xl font-semibold tracking-[-0.01em]">Algo saiu do lugar</h1>
       <p className="mt-2 max-w-sm text-sm leading-relaxed text-muted-foreground">
         A tela não conseguiu carregar. Tentar de novo costuma resolver — nada do que você já
         salvou se perdeu.

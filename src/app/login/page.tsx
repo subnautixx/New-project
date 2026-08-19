@@ -57,7 +57,7 @@ export default async function LoginPage({
         </div>
 
         <div className="relative max-w-[420px] space-y-9">
-          <h1 className="text-[26px] font-semibold leading-[1.25] tracking-tight text-foreground">
+          <h1 className="font-display text-[28px] font-bold leading-[1.15] tracking-[-0.02em] text-foreground">
             O WhatsApp da loja,
             <br />
             organizado por cliente.
@@ -94,7 +94,7 @@ export default async function LoginPage({
             <Logo className="mb-7 block text-lg lg:hidden" />
 
             <div className="space-y-2">
-              <h2 className="text-xl font-semibold tracking-tight text-foreground">
+              <h2 className="font-display text-xl font-semibold tracking-[-0.01em] text-foreground">
                 Entrar na conta
               </h2>
               <p className="text-sm leading-relaxed text-muted-foreground">

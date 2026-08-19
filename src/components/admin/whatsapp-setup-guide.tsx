@@ -521,7 +521,7 @@ export function WhatsappSetupGuide({
         </div>
 
         <div className="max-h-[42vh] space-y-3 overflow-y-auto px-5 py-4">
-          <DialogTitle className="text-base font-semibold tracking-tight">
+          <DialogTitle className="font-display text-base font-semibold tracking-[-0.01em]">
             {step.title}
           </DialogTitle>
 

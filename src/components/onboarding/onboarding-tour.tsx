@@ -75,7 +75,7 @@ export function OnboardingTour({
         <div className="h-[168px] border-b border-border bg-background">{step.visual}</div>
 
         <div className="space-y-3 px-5 py-4">
-          <DialogTitle className="text-base font-semibold tracking-tight">
+          <DialogTitle className="font-display text-base font-semibold tracking-[-0.01em]">
             {index === 0 ? `${firstName}, ${step.title.toLowerCase()}` : step.title}
           </DialogTitle>
 
