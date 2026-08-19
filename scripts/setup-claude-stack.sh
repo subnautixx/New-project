@@ -95,8 +95,35 @@ else
   echo "     cd ~/.claude/skills/gstack && ./setup"
 fi
 
+# --- 9. Skills e subagentes próprios ----------------------------------------
+# Ficam versionados em claude-stack/ e são copiados para ~/.claude/.
+# Só existem porque nada instalado acima cobria: pesquisar doc antes de assumir
+# API, refatorar sem mudar comportamento, disciplina de contexto e medir antes
+# de otimizar. O resto do que se costuma pedir já vem em Superpowers/gstack.
+echo "→ Skills e subagentes próprios"
+STACK_DIR="$(cd "$(dirname "$0")/.." && pwd)/claude-stack"
+
+if [ -d "$STACK_DIR" ]; then
+  # Backup antes de sobrescrever qualquer coisa que já exista.
+  if [ -d "$HOME/.claude/agents" ] || [ -d "$HOME/.claude/skills" ]; then
+    BACKUP="$HOME/.claude/backups/pre-stack-$(date +%Y%m%d-%H%M%S)"
+    mkdir -p "$BACKUP"
+    cp -r "$HOME/.claude/agents" "$BACKUP/" 2>/dev/null || true
+    cp -r "$HOME/.claude/skills" "$BACKUP/" 2>/dev/null || true
+    echo "   backup     → $BACKUP"
+  fi
+
+  mkdir -p "$HOME/.claude/skills" "$HOME/.claude/agents"
+  cp -r "$STACK_DIR/skills/." "$HOME/.claude/skills/"
+  cp "$STACK_DIR/agents/"*.md "$HOME/.claude/agents/"
+  echo "   skills     + $(ls "$STACK_DIR/skills" | tr '\n' ' ')"
+  echo "   agents     + $(ls "$STACK_DIR/agents" | sed 's/.md//' | tr '\n' ' ')"
+else
+  echo "   ! claude-stack/ não encontrado — rode este script de dentro do repositório"
+fi
+
 echo
 echo "→ Instalado:"
 claude plugin list 2>/dev/null | grep "^  >" || true
 echo
-echo "Reinicie o Claude Code para as skills entrarem no índice."
+echo "Reinicie o Claude Code: skills entram na hora, subagentes precisam do restart."
