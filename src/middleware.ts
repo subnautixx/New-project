@@ -1,7 +1,9 @@
 import { createServerClient } from "@supabase/ssr";
 import { NextResponse, type NextRequest } from "next/server";
 
-const PUBLIC_PATHS = ["/login", "/auth"];
+// `/privacidade` é público por exigência da Meta: a política precisa abrir sem
+// login e sem bloqueio a rastreadores para o app passar na análise.
+const PUBLIC_PATHS = ["/login", "/auth", "/privacidade"];
 
 /**
  * Renova a sessão a cada navegação e barra acesso anônimo.
