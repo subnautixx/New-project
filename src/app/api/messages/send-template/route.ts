@@ -4,6 +4,7 @@ import { authorizeRequest } from "@/lib/auth/api";
 import { rateLimit } from "@/lib/rate-limit";
 import { createSupabaseAdminClient } from "@/lib/supabase/admin";
 import { sendTemplateMessage } from "@/lib/whatsapp/client";
+import { describeSendError } from "@/lib/whatsapp/errors";
 import { renderTemplateBody } from "@/lib/whatsapp/template";
 import { authorizeConversationSend } from "@/lib/whatsapp/send-guard";
 
@@ -113,7 +114,8 @@ export async function POST(request: NextRequest) {
       provider_message_id: result.providerMessageId,
       status: result.ok ? "sent" : "failed",
       error_code: result.errorCode,
-      error_message: result.errorMessage,
+      // Guarda o texto que a pessoa vai ler, não o jargão da Graph API.
+      error_message: describeSendError(result.errorCode, result.errorMessage).message,
     })
     .eq("id", message.id)
     .select(
@@ -123,7 +125,11 @@ export async function POST(request: NextRequest) {
 
   if (!result.ok) {
     return NextResponse.json(
-      { error: "send_failed", message: result.errorMessage, messageRecord: updated },
+      {
+        error: "send_failed",
+        message: describeSendError(result.errorCode, result.errorMessage).message,
+        messageRecord: updated,
+      },
       { status: 502 },
     );
   }

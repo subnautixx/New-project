@@ -12,6 +12,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { ALL_STATUSES, STATUS_DOT, STATUS_LABEL } from "@/lib/domain/lead";
+import { describeServiceWindow } from "@/lib/domain/service-window";
 import { formatListTime } from "@/lib/format";
 import type { LeadStatus } from "@/lib/types/database";
 import type { ConversationListItem, UserRef } from "@/lib/types/views";
@@ -218,6 +219,8 @@ function ConversationRow({
 }) {
   const vehicle = [c.vehicle?.brand, c.vehicle?.model].filter(Boolean).join(" ");
   const unread = c.unread_count > 0;
+  // Quem está para perder a janela precisa ser visto sem abrir a conversa.
+  const janela = describeServiceWindow(c.service_window_expires_at);
 
   return (
     <li className="px-2">
@@ -285,6 +288,25 @@ function ConversationRow({
               title={STATUS_LABEL[c.contact.status]}
             />
             <span className="shrink-0">{STATUS_LABEL[c.contact.status]}</span>
+
+            {janela.state === "acabando" ? (
+              <span
+                className="shrink-0 rounded-full bg-amber-500/15 px-1.5 text-[10px] font-medium text-amber-300 ring-1 ring-inset ring-amber-500/25"
+                title="A janela de 24 horas está acabando"
+              >
+                {janela.minutesLeft !== null && janela.minutesLeft < 60
+                  ? `${janela.minutesLeft}min`
+                  : `${Math.floor((janela.minutesLeft ?? 0) / 60)}h`}
+              </span>
+            ) : janela.state === "fechada" ? (
+              <span
+                className="shrink-0 rounded-full bg-surface-muted px-1.5 text-[10px] font-medium text-muted-foreground/80 ring-1 ring-inset ring-border"
+                title="A janela de 24 horas fechou — só com modelo aprovado"
+              >
+                fechada
+              </span>
+            ) : null}
+
             {vehicle ? (
               <>
                 <span className="text-muted-foreground/40">·</span>

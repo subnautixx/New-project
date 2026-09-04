@@ -1,9 +1,10 @@
 "use client";
 
 import { AlertTriangle, Loader2, Paperclip, SendHorizonal, X } from "lucide-react";
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
+import { describeServiceWindow } from "@/lib/domain/service-window";
 import { compressIfNeeded } from "@/lib/media/compress";
 import { createSupabaseBrowserClient } from "@/lib/supabase/client";
 import type { ConversationListItem, ThreadMessage, UserRef } from "@/lib/types/views";
@@ -52,7 +53,16 @@ export function Composer({
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const windowExpiresAt = conversation.service_window_expires_at;
-  const windowExpired = Boolean(windowExpiresAt && new Date(windowExpiresAt) <= new Date());
+  // Recalcula a cada minuto: um aviso de "faltam 40 min" congelado na tela é
+  // pior que nenhum aviso.
+  const [agora, setAgora] = useState(() => new Date());
+  useEffect(() => {
+    const id = setInterval(() => setAgora(new Date()), 60_000);
+    return () => clearInterval(id);
+  }, []);
+
+  const janela = describeServiceWindow(windowExpiresAt, agora);
+  const windowExpired = janela.state === "fechada";
 
   async function pickFile(event: React.ChangeEvent<HTMLInputElement>) {
     const chosen = Array.from(event.target.files ?? []);
@@ -288,6 +298,16 @@ export function Composer({
 
   return (
     <div className="shrink-0 border-t border-border bg-surface px-3 py-2.5">
+      {janela.state === "acabando" ? (
+        <p className="mb-2 flex items-center gap-2 rounded-lg bg-amber-500/[0.08] px-2.5 py-2 text-xs text-amber-200/90 ring-1 ring-inset ring-amber-500/20">
+          <AlertTriangle className="h-3.5 w-3.5 shrink-0 text-amber-400" />
+          <span>
+            <strong className="font-semibold">{janela.label}.</strong> Depois disso, só com um
+            modelo aprovado.
+          </span>
+        </p>
+      ) : null}
+
       {error ? (
         <p role="alert" className="mb-2 px-1 text-xs text-destructive">
           {error}
