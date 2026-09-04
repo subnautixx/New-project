@@ -29,7 +29,8 @@ export const ACCEPTED_MIME_TYPES = [
 
 const MB = 1024 * 1024;
 
-const LIMITS: Record<"image" | "video" | "audio" | "document", number> = {
+/** Limite por categoria, exposto para o navegador poder encolher antes de subir. */
+export const LIMIT_FOR_KIND: Record<"image" | "video" | "audio" | "document", number> = {
   image: 5 * MB,
   video: 16 * MB,
   audio: 16 * MB,
@@ -74,7 +75,7 @@ export function validateMedia(mimeType: string, sizeBytes: number): MediaValidat
     return { ok: false, kind, messageType: null, error: "Arquivo vazio." };
   }
 
-  const limit = LIMITS[kind];
+  const limit = LIMIT_FOR_KIND[kind];
   if (sizeBytes > limit) {
     return {
       ok: false,

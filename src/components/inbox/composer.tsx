@@ -4,6 +4,7 @@ import { AlertTriangle, Loader2, Paperclip, SendHorizonal, X } from "lucide-reac
 import { useRef, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
+import { compressIfNeeded } from "@/lib/media/compress";
 import { createSupabaseBrowserClient } from "@/lib/supabase/client";
 import type { ConversationListItem, ThreadMessage, UserRef } from "@/lib/types/views";
 import { ACCEPTED_MIME_TYPES, validateMedia } from "@/lib/whatsapp/media";
@@ -12,6 +13,9 @@ import { QuickReplies } from "./quick-replies";
 import { TemplateDialog } from "./template-dialog";
 
 const MAX_LENGTH = 4096;
+
+/** Teto por envio. Acima disso a fila demora e a janela de 24h corre. */
+const MAX_FILES = 10;
 
 interface Props {
   conversation: ConversationListItem;
@@ -39,7 +43,9 @@ export function Composer({
   onPendingDone,
 }: Props) {
   const [text, setText] = useState("");
-  const [file, setFile] = useState<File | null>(null);
+  const [files, setFiles] = useState<File[]>([]);
+  /** Quando manda vários: "enviando 2 de 5". */
+  const [progress, setProgress] = useState<{ done: number; total: number } | null>(null);
   const [sending, setSending] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
@@ -48,20 +54,40 @@ export function Composer({
   const windowExpiresAt = conversation.service_window_expires_at;
   const windowExpired = Boolean(windowExpiresAt && new Date(windowExpiresAt) <= new Date());
 
-  function pickFile(event: React.ChangeEvent<HTMLInputElement>) {
-    const chosen = event.target.files?.[0];
+  async function pickFile(event: React.ChangeEvent<HTMLInputElement>) {
+    const chosen = Array.from(event.target.files ?? []);
     event.target.value = ""; // permite escolher o mesmo arquivo de novo
-    if (!chosen) return;
-
-    // Mesma validação do backend, aqui só para avisar antes de gastar upload.
-    const validation = validateMedia(chosen.type, chosen.size);
-    if (!validation.ok) {
-      setError(validation.error);
-      return;
-    }
+    if (chosen.length === 0) return;
 
     setError(null);
-    setFile(chosen);
+
+    const aceitos: File[] = [];
+    const recusados: string[] = [];
+
+    for (const original of chosen) {
+      // Foto acima do limite é encolhida em vez de recusada — o limite é da
+      // Meta e não dá para aumentar, mas quase toda foto cabe depois de
+      // reduzida.
+      const { file } = await compressIfNeeded(original);
+      const validation = validateMedia(file.type, file.size);
+
+      if (validation.ok) aceitos.push(file);
+      else recusados.push(original.name);
+    }
+
+    if (recusados.length > 0) {
+      setError(
+        recusados.length === 1
+          ? `${recusados[0]} não pôde ser enviado: formato ou tamanho fora do aceito pelo WhatsApp.`
+          : `${recusados.length} arquivos não puderam ser enviados: formato ou tamanho fora do aceito pelo WhatsApp.`,
+      );
+    }
+
+    setFiles((prev) => [...prev, ...aceitos].slice(0, MAX_FILES));
+  }
+
+  function removeFile(index: number) {
+    setFiles((prev) => prev.filter((_, i) => i !== index));
   }
 
   async function uploadAndSend(chosen: File, caption: string): Promise<boolean> {
@@ -154,23 +180,40 @@ export function Composer({
 
   async function send() {
     const body = text.trim();
-    if ((!body && !file) || sending) return;
+    if ((!body && files.length === 0) || sending) return;
 
     setSending(true);
     setError(null);
 
     // Anexo continua esperando a resposta: o upload tem estado próprio na tela,
     // e um balão provisório sem a mídia carregada só confundiria.
-    if (file) {
+    if (files.length > 0) {
+      const total = files.length;
+      setProgress({ done: 0, total });
+
       try {
-        if (await uploadAndSend(file, body)) {
-          setText("");
-          setFile(null);
-          textareaRef.current?.focus();
+        // Um arquivo por mensagem — a Cloud API não aceita várias mídias na
+        // mesma. A legenda vai só na primeira, como no WhatsApp.
+        for (const [index, item] of files.entries()) {
+          const ok = await uploadAndSend(item, index === 0 ? body : "");
+
+          if (!ok) {
+            // Para na primeira falha e mantém o que ainda não foi: reenviar o
+            // que já chegou duplicaria mensagem para o cliente.
+            setFiles(files.slice(index));
+            return;
+          }
+
+          setProgress({ done: index + 1, total });
         }
+
+        setText("");
+        setFiles([]);
+        textareaRef.current?.focus();
       } catch {
         setError("Sem conexão com o servidor.");
       } finally {
+        setProgress(null);
         setSending(false);
       }
       return;
@@ -251,22 +294,52 @@ export function Composer({
         </p>
       ) : null}
 
-      {file ? (
-        <div className="mb-2 flex items-center gap-2 rounded-lg bg-surface-muted px-2.5 py-2 text-xs ring-1 ring-inset ring-border">
-          <Paperclip className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
-          <span className="min-w-0 flex-1 truncate font-medium">{file.name}</span>
-          <span className="shrink-0 tabular-nums text-muted-foreground">
-            {(file.size / (1024 * 1024)).toFixed(1)} MB
-          </span>
-          <button
-            type="button"
-            onClick={() => setFile(null)}
-            disabled={sending}
-            className="shrink-0 rounded p-0.5 text-muted-foreground transition-colors hover:bg-secondary hover:text-foreground"
-          >
-            <X className="h-3.5 w-3.5" />
-            <span className="sr-only">Remover arquivo</span>
-          </button>
+      {files.length > 0 ? (
+        <div className="mb-2 space-y-1">
+          <div className="flex items-center justify-between px-1 text-[11px] text-muted-foreground">
+            <span>
+              {files.length === 1 ? "1 arquivo" : `${files.length} arquivos`}
+              {files.length > 1 ? " · vão como mensagens separadas" : ""}
+            </span>
+            {progress ? (
+              <span className="tabular-nums text-primary">
+                enviando {progress.done + 1} de {progress.total}
+              </span>
+            ) : (
+              <button
+                type="button"
+                onClick={() => setFiles([])}
+                disabled={sending}
+                className="transition-colors hover:text-foreground"
+              >
+                Remover todos
+              </button>
+            )}
+          </div>
+
+          <ul className="max-h-40 space-y-1 overflow-y-auto">
+            {files.map((item, index) => (
+              <li
+                key={`${item.name}-${index}`}
+                className="flex items-center gap-2 rounded-lg bg-surface-muted px-2.5 py-2 text-xs ring-1 ring-inset ring-border"
+              >
+                <Paperclip className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+                <span className="min-w-0 flex-1 truncate font-medium">{item.name}</span>
+                <span className="shrink-0 tabular-nums text-muted-foreground">
+                  {(item.size / (1024 * 1024)).toFixed(1)} MB
+                </span>
+                <button
+                  type="button"
+                  onClick={() => removeFile(index)}
+                  disabled={sending}
+                  className="shrink-0 rounded p-0.5 text-muted-foreground transition-colors hover:bg-secondary hover:text-foreground"
+                >
+                  <X className="h-3.5 w-3.5" />
+                  <span className="sr-only">Remover {item.name}</span>
+                </button>
+              </li>
+            ))}
+          </ul>
         </div>
       ) : null}
 
@@ -274,9 +347,10 @@ export function Composer({
         <input
           ref={fileInputRef}
           type="file"
+          multiple
           className="hidden"
           accept={ACCEPTED_MIME_TYPES.join(",")}
-          onChange={pickFile}
+          onChange={(e) => void pickFile(e)}
         />
 
         <Button
@@ -311,7 +385,7 @@ export function Composer({
           value={text}
           onChange={(e) => setText(e.target.value.slice(0, MAX_LENGTH))}
           onKeyDown={handleKeyDown}
-          placeholder={file ? "Legenda (opcional)…" : "Escreva uma mensagem…"}
+          placeholder={files.length > 0 ? "Legenda (opcional)…" : "Escreva uma mensagem…"}
           rows={1}
           aria-label="Mensagem"
           className="max-h-40 min-h-[38px] resize-none rounded-xl py-2"
@@ -319,7 +393,7 @@ export function Composer({
 
         <Button
           onClick={() => void send()}
-          disabled={sending || (text.trim().length === 0 && !file)}
+          disabled={sending || (text.trim().length === 0 && files.length === 0)}
           size="icon"
           title="Enviar (Enter)"
           className="shrink-0 rounded-full"
