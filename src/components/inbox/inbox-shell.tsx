@@ -5,10 +5,12 @@ import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { FirstSteps, type FirstStepsState } from "@/components/onboarding/first-steps";
 import { EmptyState } from "@/components/ui/misc";
+import { showMessageNotification, shouldNotify } from "@/lib/notifications";
 import { createSupabaseBrowserClient } from "@/lib/supabase/client";
 import type { ConversationListItem, UserRef } from "@/lib/types/views";
 import { cn } from "@/lib/utils";
 import { ContactPanel } from "./contact-panel";
+import { NotificationPrompt } from "./notification-prompt";
 import { ConversationList } from "./conversation-list";
 import { MessageThread } from "./message-thread";
 
@@ -51,6 +53,14 @@ export function InboxShell({
   const selectedIdRef = useRef(selectedId);
   selectedIdRef.current = selectedId;
 
+  // O canal do realtime é assinado uma vez só. Sem estas referências, o
+  // handler ficaria preso à primeira lista de conversas e ao primeiro
+  // handleSelect — e notificaria com nome errado.
+  const conversationsRef = useRef(conversations);
+  conversationsRef.current = conversations;
+
+  const handleSelectRef = useRef<(id: string) => void>(() => {});
+
   const scheduleRefresh = useCallback(() => {
     if (refreshTimer.current) clearTimeout(refreshTimer.current);
     refreshTimer.current = setTimeout(() => router.refresh(), REFRESH_DEBOUNCE_MS);
@@ -65,10 +75,49 @@ export function InboxShell({
       .channel("inbox")
       .on(
         "postgres_changes",
-        { event: "*", schema: "public", table: "messages" },
+        { event: "INSERT", schema: "public", table: "messages" },
         (payload) => {
-          const record = (payload.new ?? payload.old) as { conversation_id?: string } | null;
+          const record = payload.new as {
+            conversation_id?: string;
+            direction?: "inbound" | "outbound";
+            content?: string | null;
+          } | null;
 
+          if (!record?.conversation_id) return;
+
+          const decision = shouldNotify({
+            direction: record.direction ?? "outbound",
+            conversationId: record.conversation_id,
+            openConversationId: selectedIdRef.current,
+            documentHidden: document.hidden,
+          });
+
+          if (decision.notify) {
+            // O nome do contato vem da lista já carregada; a RLS garante que
+            // só está aqui o que este usuário pode ver.
+            const conversa = conversationsRef.current.find(
+              (c) => c.id === record.conversation_id,
+            );
+
+            showMessageNotification({
+              contactName: conversa?.contact.full_name ?? "Nova mensagem",
+              preview: record.content ?? "",
+              conversationId: record.conversation_id,
+              onClick: () => handleSelectRef.current(record.conversation_id as string),
+            });
+          }
+
+          if (record.conversation_id === selectedIdRef.current) {
+            setThreadToken((t) => t + 1);
+          }
+          scheduleRefresh();
+        },
+      )
+      .on(
+        "postgres_changes",
+        { event: "UPDATE", schema: "public", table: "messages" },
+        (payload) => {
+          const record = payload.new as { conversation_id?: string } | null;
           if (record?.conversation_id === selectedIdRef.current) {
             setThreadToken((t) => t + 1);
           }
@@ -101,15 +150,22 @@ export function InboxShell({
     window.history.replaceState(null, "", `/inbox?c=${id}`);
   }
 
+  handleSelectRef.current = handleSelect;
+
   return (
     <div className="flex h-full min-h-0">
       {/* Coluna esquerda: no celular ocupa a tela toda até abrir uma conversa. */}
       <div
         className={cn(
-          "w-full shrink-0 border-r border-border bg-surface md:w-[320px] lg:w-[360px]",
-          selected ? "hidden md:block" : "block",
+          // Coluna em flex: o convite ocupa o que precisa e a lista fica com o
+          // resto. Sem isto, a lista continuaria pedindo 100% da altura e a
+          // coluna estouraria.
+          "w-full shrink-0 flex-col border-r border-border bg-surface md:w-[320px] lg:w-[360px]",
+          selected ? "hidden md:flex" : "flex",
         )}
       >
+        <NotificationPrompt onGranted={() => router.refresh()} />
+
         <ConversationList
           conversations={conversations}
           selectedId={selectedId}

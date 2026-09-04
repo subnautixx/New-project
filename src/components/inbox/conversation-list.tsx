@@ -62,7 +62,7 @@ export function ConversationList({ conversations, selectedId, onSelect, users, i
   const hasFilters = status !== "todos" || assignee !== "todos" || unreadOnly;
 
   return (
-    <div className="flex h-full flex-col">
+    <div className="flex h-full min-h-0 flex-1 flex-col">
       <div className="space-y-2.5 border-b border-border px-3 pb-2.5 pt-3">
         <div className="relative">
           <Search className="pointer-events-none absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" />
