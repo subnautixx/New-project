@@ -13,6 +13,40 @@ afterEach(() => {
   vi.useRealTimers();
 });
 
+describe("resolvePeriod — estabilidade do fim do período", () => {
+  /**
+   * Regressão da tela de Desempenho que ficava girando para sempre.
+   *
+   * O fim do período vai parar na chave de cache da consulta. Com a precisão
+   * de milissegundo do `new Date()`, cada render gerava uma chave diferente,
+   * que disparava uma busca nova, que causava outro render — laço infinito,
+   * carregando eterno e banco martelado.
+   */
+  it("devolve o mesmo fim quando chamada duas vezes no mesmo minuto", () => {
+    const primeira = resolvePeriod({ periodo: "7d" });
+    vi.setSystemTime(new Date("2026-08-12T18:30:45.123Z")); // 45s depois
+    const segunda = resolvePeriod({ periodo: "7d" });
+
+    expect(segunda.to.getTime()).toBe(primeira.to.getTime());
+  });
+
+  it("não carrega segundo nem milissegundo", () => {
+    vi.setSystemTime(new Date("2026-08-12T18:30:45.678Z"));
+    const { to } = resolvePeriod({});
+
+    expect(to.getSeconds()).toBe(0);
+    expect(to.getMilliseconds()).toBe(0);
+    expect(to.toISOString()).toBe("2026-08-12T18:30:00.000Z");
+  });
+
+  it("anda quando o minuto vira — continua sendo 'até agora'", () => {
+    const antes = resolvePeriod({});
+    vi.setSystemTime(new Date("2026-08-12T18:31:10Z"));
+
+    expect(resolvePeriod({}).to.getTime()).toBeGreaterThan(antes.to.getTime());
+  });
+});
+
 describe("resolvePeriod", () => {
   it("usa hoje como padrão, começando à meia-noite local", () => {
     const period = resolvePeriod({});

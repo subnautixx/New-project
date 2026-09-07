@@ -1,5 +1,12 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
-import { APP_TIME_ZONE, addDaysInAppTz, dayKeyInAppTz, hourInAppTz, startOfDayInAppTz } from "@/lib/time";
+import {
+  APP_TIME_ZONE,
+  addDaysInAppTz,
+  dayKeyInAppTz,
+  hourInAppTz,
+  startOfDayInAppTz,
+  truncateToMinute,
+} from "@/lib/time";
 import type { Database, MetricsSummaryRow, MetricsVolumeRow } from "@/lib/types/database";
 
 type Client = SupabaseClient<Database>;
@@ -48,6 +55,11 @@ export function resolvePeriod(params: {
   ate?: string;
 }): Period {
   const now = new Date();
+  // "Até agora" truncado no minuto. Este valor vai parar na chave de cache da
+  // tela de Desempenho; com a precisão de milissegundo do `new Date()`, cada
+  // render produzia uma chave diferente e a página ficava buscando em laço,
+  // sem nunca sair do carregando.
+  const agora = truncateToMinute(now);
 
   if (params.de) {
     const from = parseDateInput(params.de);
@@ -68,11 +80,11 @@ export function resolvePeriod(params: {
 
   switch (params.periodo) {
     case "7d":
-      return { key: "7d", label: "7 dias", from: addDaysInAppTz(today, -6), to: now };
+      return { key: "7d", label: "7 dias", from: addDaysInAppTz(today, -6), to: agora };
     case "30d":
-      return { key: "30d", label: "30 dias", from: addDaysInAppTz(today, -29), to: now };
+      return { key: "30d", label: "30 dias", from: addDaysInAppTz(today, -29), to: agora };
     default:
-      return { key: "hoje", label: "Hoje", from: today, to: now };
+      return { key: "hoje", label: "Hoje", from: today, to: agora };
   }
 }
 

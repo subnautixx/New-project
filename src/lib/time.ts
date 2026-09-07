@@ -62,6 +62,22 @@ export function timeZoneOffsetMs(date: Date): number {
   return asUtc - (date.getTime() - date.getMilliseconds());
 }
 
+/**
+ * Trunca no minuto. Segundo e milissegundo não dependem de fuso, então isto
+ * vale em qualquer lugar do mundo.
+ *
+ * Existe para dar estabilidade a um "agora" que vai virar chave de cache.
+ * `new Date()` cru muda a cada milissegundo: onde esse valor entra numa chave
+ * de consulta, cada render gera uma chave nova, que dispara uma busca nova,
+ * que causa outro render — a tela gira para sempre e martela o banco. No
+ * minuto o valor fica parado, sem perder o sentido de "até agora".
+ */
+export function truncateToMinute(date: Date): Date {
+  const truncated = new Date(date.getTime());
+  truncated.setSeconds(0, 0);
+  return truncated;
+}
+
 /** Instante correspondente à meia-noite daquele dia no fuso da operação. */
 export function startOfDayInAppTz(date: Date): Date {
   const offset = timeZoneOffsetMs(date);

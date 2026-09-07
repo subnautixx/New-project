@@ -1,8 +1,9 @@
 "use client";
 
 import { AlertCircle, Check, CheckCheck, Clock, FileText, Mic, Video } from "lucide-react";
-import { useEffect, useRef, useState } from "react";
+
 import { formatTime } from "@/lib/format";
+import { useAuthedObjectUrl, useNearViewport } from "@/lib/media/use-authed-media";
 import type { ThreadMessage } from "@/lib/types/views";
 import { cn } from "@/lib/utils";
 import { statusLabel } from "@/lib/whatsapp/status";
@@ -31,84 +32,6 @@ function StatusTicks({ message }: { message: ThreadMessage }) {
   return <Check className="h-3.5 w-3.5 opacity-70" aria-label="Enviada" />;
 }
 
-/** Avisa quando o elemento chega perto da tela, para só então baixar. */
-function useNearViewport<T extends HTMLElement>() {
-  const ref = useRef<T>(null);
-  const [near, setNear] = useState(false);
-
-  useEffect(() => {
-    const element = ref.current;
-    if (!element || near) return;
-
-    // Navegador sem suporte baixa logo: melhor cedo do que não mostrar.
-    if (typeof IntersectionObserver === "undefined") {
-      setNear(true);
-      return;
-    }
-
-    const observer = new IntersectionObserver(
-      (entries) => {
-        if (entries.some((entry) => entry.isIntersecting)) setNear(true);
-      },
-      // Começa a baixar um pouco antes de aparecer, para chegar pronto.
-      { rootMargin: "400px" },
-    );
-
-    observer.observe(element);
-    return () => observer.disconnect();
-  }, [near]);
-
-  return { ref, near };
-}
-
-/**
- * Baixa a mídia e devolve uma URL local.
- *
- * Não dá para apontar `<img src>` direto para `/api/media/...`: o navegador
- * não anexa cabeçalho de autorização em img, audio, video ou link — só manda
- * cookie. Onde a sessão não vive em cookie, toda mídia voltava 401 e o balão
- * ficava vazio.
- *
- * Buscando por `fetch`, a requisição leva a sessão do mesmo jeito que
- * qualquer outra chamada de API, e o binário vira uma URL de objeto que as
- * tags conseguem consumir. Funciona com sessão em cookie ou em cabeçalho.
- */
-function useMediaObjectUrl(messageId: string, enabled: boolean) {
-  const [url, setUrl] = useState<string | null>(null);
-  const [failed, setFailed] = useState(false);
-
-  useEffect(() => {
-    if (!enabled) return;
-
-    let active = true;
-    let objectUrl: string | null = null;
-
-    void (async () => {
-      try {
-        const response = await fetch(`/api/media/${messageId}`);
-        if (!response.ok) throw new Error(String(response.status));
-
-        const blob = await response.blob();
-        if (!active) return;
-
-        objectUrl = URL.createObjectURL(blob);
-        setUrl(objectUrl);
-      } catch {
-        if (active) setFailed(true);
-      }
-    })();
-
-    return () => {
-      active = false;
-      // Sem isto, uma conversa longa com muitas fotos deixaria dezenas de
-      // megabytes presos em URLs de objeto até recarregar a página.
-      if (objectUrl) URL.revokeObjectURL(objectUrl);
-    };
-  }, [messageId, enabled]);
-
-  return { url, failed };
-}
-
 /** Espaço reservado enquanto a mídia não chega, no formato de cada tipo. */
 const PLACEHOLDER_SIZE: Record<string, string> = {
   image: "h-40 w-56",
@@ -120,7 +43,7 @@ const PLACEHOLDER_SIZE: Record<string, string> = {
 
 function MediaContent({ message }: { message: ThreadMessage }) {
   const { ref, near } = useNearViewport<HTMLSpanElement>();
-  const { url, failed } = useMediaObjectUrl(message.id, near);
+  const { objectUrl: url, failed } = useAuthedObjectUrl(`/api/media/${message.id}`, near);
 
   if (failed) {
     return (
