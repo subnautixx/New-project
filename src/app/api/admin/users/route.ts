@@ -46,12 +46,35 @@ export async function POST(request: NextRequest) {
     );
   }
 
-  // O trigger handle_new_auth_user já criou o profile com papel padrão;
-  // aqui aplicamos os campos que só o admin pode definir.
-  await admin
-    .from("profiles")
-    .update({ full_name: fullName, role, phone: normalizePhone(phone ?? null), email })
-    .eq("id", created.user.id);
+  // `upsert`, não `update`: o trigger handle_new_auth_user normalmente já criou
+  // o profile, mas depender disso em silêncio é frágil. Num banco onde o
+  // trigger não existisse, o update não acertava linha nenhuma, a rota
+  // devolvia 201 assim mesmo, e nascia um usuário que autentica e leva 403 em
+  // tudo — porque authorizeRequest exige um profile ativo. Difícil de
+  // diagnosticar justamente porque a tela dizia que deu certo.
+  const { error: profileError } = await admin.from("profiles").upsert(
+    {
+      id: created.user.id,
+      full_name: fullName,
+      role,
+      phone: normalizePhone(phone ?? null),
+      email,
+      is_active: true,
+    },
+    { onConflict: "id" },
+  );
+
+  if (profileError) {
+    // Sem profile a conta não serve para nada. Melhor falhar aqui, com o
+    // motivo, do que entregar um acesso que não abre porta nenhuma.
+    return NextResponse.json(
+      {
+        error: "profile_failed",
+        message: "Usuário criado no login, mas o perfil não pôde ser salvo. Avise o suporte.",
+      },
+      { status: 500 },
+    );
+  }
 
   if (whatsappAccountIds.length > 0) {
     await admin.from("user_whatsapp_permissions").insert(
