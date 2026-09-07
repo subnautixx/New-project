@@ -42,6 +42,7 @@ export function MessageThread({
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const bottomRef = useRef<HTMLDivElement>(null);
+  const scrollRef = useRef<HTMLDivElement>(null);
 
   const conversationId = conversation.id;
 
@@ -69,10 +70,25 @@ export function MessageThread({
     setLoading(false);
   }, [conversationId]);
 
+  /** Qual conversa já está na tela — não confundir troca com recarga. */
+  const shownConversation = useRef(conversationId);
+
   useEffect(() => {
-    setLoading(true);
+    // Trocar de conversa mostra o spinner. Recarregar a MESMA conversa não:
+    // o conteúdo é trocado por baixo, sem piscar.
+    //
+    // Antes o spinner subia nas duas situações. Como o realtime avisa a cada
+    // mensagem — inclusive as que a própria loja envia —, toda vez que alguém
+    // enviava algo a conversa inteira sumia por um instante e voltava com o
+    // scroll fora do lugar.
+    if (shownConversation.current !== conversationId) {
+      shownConversation.current = conversationId;
+      setMessages([]);
+      setLoading(true);
+    }
+
     void load();
-  }, [load, refreshToken]);
+  }, [load, conversationId, refreshToken]);
 
   // Trocar de conversa não pode levar junto um balão provisório da anterior.
   useEffect(() => setPending([]), [conversationId]);
@@ -83,7 +99,23 @@ export function MessageThread({
     void fetch(`/api/conversations/${conversationId}/read`, { method: "POST" });
   }, [conversationId, conversation.unread_count]);
 
+  /**
+   * Só acompanha o fim da conversa quem já estava no fim.
+   *
+   * Sem isto, uma mensagem chegando enquanto alguém lê o histórico arranca a
+   * tela de volta para baixo no meio da leitura.
+   */
+  const stickToBottom = useRef(true);
+
+  function handleScroll() {
+    const el = scrollRef.current;
+    if (!el) return;
+    // Folga de 80px: quem está "no fim" quase nunca está no pixel exato.
+    stickToBottom.current = el.scrollHeight - el.scrollTop - el.clientHeight < 80;
+  }
+
   useEffect(() => {
+    if (!stickToBottom.current) return;
     bottomRef.current?.scrollIntoView({ block: "end" });
   }, [messages.length, pending.length]);
 
@@ -140,7 +172,11 @@ export function MessageThread({
         </Button>
       </header>
 
-      <div className="chat-canvas min-h-0 flex-1 overflow-y-auto px-3 py-4">
+      <div
+        ref={scrollRef}
+        onScroll={handleScroll}
+        className="chat-canvas min-h-0 flex-1 overflow-y-auto px-3 py-4"
+      >
         {loading ? (
           <div className="flex h-full items-center justify-center">
             <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" />
@@ -194,8 +230,16 @@ export function MessageThread({
         isAdmin={isAdmin}
         users={users}
         currentUserId={currentUserId}
-        onSent={(message) => setMessages((prev) => [...prev, message])}
-        onPending={(clientRef, text) => setPending((prev) => [...prev, { clientRef, text }])}
+        // O que a própria pessoa acabou de enviar sempre volta para o fim da
+        // conversa, mesmo que ela estivesse lendo o histórico.
+        onSent={(message) => {
+          stickToBottom.current = true;
+          setMessages((prev) => [...prev, message]);
+        }}
+        onPending={(clientRef, text) => {
+          stickToBottom.current = true;
+          setPending((prev) => [...prev, { clientRef, text }]);
+        }}
         onPendingDone={(clientRef) =>
           setPending((prev) => prev.filter((p) => p.clientRef !== clientRef))
         }

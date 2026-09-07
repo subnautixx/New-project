@@ -22,7 +22,11 @@ export function Stat({
         emphasis ? "border-primary/25 bg-primary/[0.04]" : "border-border",
       )}
     >
-      <p className="truncate text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
+      {/* No celular cabem duas colunas, e aí "Mensagens recebidas" não cabe numa
+          linha só — cortar vira "MENSAGENS RECEBI…". Quebra em duas linhas; a
+          grade iguala a altura dos cartões da mesma linha. A partir de sm o
+          rótulo cabe inteiro e o corte volta a ser só uma proteção. */}
+      <p className="text-[11px] font-medium uppercase leading-4 tracking-wide text-muted-foreground sm:truncate">
         {label}
       </p>
       <p

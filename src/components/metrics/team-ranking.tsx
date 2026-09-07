@@ -38,7 +38,9 @@ export function TeamRanking({ rows }: { rows: MetricsSummaryRow[] }) {
         <tbody>
           {rows.map((row) => (
             <tr key={row.user_id} className="border-b border-border/60 last:border-0 hover:bg-surface">
-              <td className="px-3 py-2 font-medium">{row.full_name ?? "—"}</td>
+              {/* A tabela já rola de lado; deixar o nome quebrar só empilhava
+                  "Marcos Vinícius de Oliveira" em três linhas. */}
+              <td className="whitespace-nowrap px-3 py-2 font-medium">{row.full_name ?? "—"}</td>
               <td className="px-3 py-2 text-right">{row.messages_sent}</td>
               <td className="px-3 py-2 text-right text-muted-foreground">
                 {row.messages_received}

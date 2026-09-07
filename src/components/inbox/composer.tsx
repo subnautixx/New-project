@@ -405,10 +405,13 @@ export function Composer({
           value={text}
           onChange={(e) => setText(e.target.value.slice(0, MAX_LENGTH))}
           onKeyDown={handleKeyDown}
-          placeholder={files.length > 0 ? "Legenda (opcional)…" : "Escreva uma mensagem…"}
+          // Texto curto de propósito: no celular sobram ~165px depois dos
+          // quatro botões, e "Escreva uma mensagem…" quebrava em duas linhas
+          // dentro de um campo de uma linha só — a segunda ficava cortada.
+          placeholder={files.length > 0 ? "Legenda (opcional)…" : "Mensagem…"}
           rows={1}
           aria-label="Mensagem"
-          className="max-h-40 min-h-[38px] resize-none rounded-xl py-2"
+          className="max-h-40 min-h-[38px] min-w-0 resize-none rounded-xl py-2"
         />
 
         <Button

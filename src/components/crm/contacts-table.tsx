@@ -71,8 +71,10 @@ export function ContactsTable({ contacts, users, isAdmin }: Props) {
   }, [contacts, search, status, owner, pendingOnly]);
 
   return (
-    <div className="flex min-h-0 flex-1 flex-col">
-      <div className="flex flex-wrap items-center gap-2 border-b border-border px-4 py-2.5">
+    // `min-w-0`: sem isto a tabela larga não deixa a coluna encolher e empurra
+    // a página inteira para o lado no celular.
+    <div className="flex min-h-0 min-w-0 flex-1 flex-col">
+      <div className="flex flex-wrap items-center gap-2 border-b border-border px-3 py-2.5 sm:px-4">
         <div className="relative min-w-[200px] flex-1 sm:max-w-xs">
           <Search className="pointer-events-none absolute left-2.5 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
           <Input
@@ -125,7 +127,7 @@ export function ContactsTable({ contacts, users, isAdmin }: Props) {
         </span>
       </div>
 
-      <div className="min-h-0 flex-1 overflow-auto">
+      <div className="min-h-0 min-w-0 flex-1 overflow-auto">
         {filtered.length === 0 ? (
           <EmptyState
             title={contacts.length === 0 ? "Nenhum cliente cadastrado" : "Nada encontrado"}
@@ -136,7 +138,16 @@ export function ContactsTable({ contacts, users, isAdmin }: Props) {
             }
           />
         ) : (
-          <table className="w-full min-w-[1020px] border-collapse text-sm">
+          <>
+            {/* No celular, a tabela de nove colunas obrigaria a arrastar a tela
+                de lado para ler qualquer coisa. Mesma informação, empilhada. */}
+            <ul className="divide-y divide-border/50 lg:hidden">
+              {filtered.map((c) => (
+                <ContactCard key={c.id} contact={c} isAdmin={isAdmin} now={now} />
+              ))}
+            </ul>
+
+            <table className="hidden w-full min-w-[1020px] border-collapse text-sm lg:table">
             <thead className="sticky top-0 z-10 bg-background">
               <tr className="border-b border-border text-left text-[11px] uppercase tracking-wide text-muted-foreground">
                 <th className="whitespace-nowrap px-4 py-2 font-medium">Cliente</th>
@@ -220,10 +231,98 @@ export function ContactsTable({ contacts, users, isAdmin }: Props) {
                 </tr>
               ))}
             </tbody>
-          </table>
+            </table>
+          </>
         )}
       </div>
     </div>
+  );
+}
+
+/**
+ * Um cliente no celular.
+ *
+ * A ordem segue a pergunta que se faz olhando a lista: quem é, que carro,
+ * por quanto, em que pé está e o que falta fazer. Preço e próxima ação são o
+ * que muda a decisão do dia, então ficam visíveis sem precisar abrir a ficha.
+ */
+function ContactCard({
+  contact: c,
+  isAdmin,
+  now,
+}: {
+  contact: ContactListItem;
+  isAdmin: boolean;
+  now: number | null;
+}) {
+  const vehicle = [c.vehicle?.brand, c.vehicle?.model].filter(Boolean).join(" ");
+  const price = formatCurrencyBRL(c.vehicle?.listed_price);
+  const overdue = c.next_action_at !== null && now !== null && new Date(c.next_action_at).getTime() <= now;
+
+  return (
+    <li>
+      <Link
+        href={`/clientes/${c.id}`}
+        className="flex gap-3 px-3 py-3 transition-colors active:bg-surface"
+      >
+        <ContactAvatar
+          contactId={c.id}
+          name={c.full_name}
+          photoPath={c.photo_path}
+          className="mt-0.5 h-9 w-9 shrink-0"
+        />
+
+        <div className="min-w-0 flex-1 space-y-1">
+          <div className="flex items-baseline gap-2">
+            <span className="min-w-0 flex-1 truncate text-[13px] font-medium leading-5">
+              {c.full_name}
+            </span>
+            <span className="shrink-0 text-[11px] tabular-nums text-muted-foreground">
+              {formatDate(c.last_interaction_at)}
+            </span>
+          </div>
+
+          <p className="truncate text-xs text-muted-foreground">{formatPhone(c.phone_e164)}</p>
+
+          {vehicle ? (
+            <p className="truncate text-xs text-foreground/75">
+              {vehicle}
+              {c.vehicle?.year ? (
+                <span className="text-muted-foreground"> · {c.vehicle.year}</span>
+              ) : null}
+              {price !== "—" ? <span className="text-muted-foreground"> · {price}</span> : null}
+            </p>
+          ) : null}
+
+          <div className="flex flex-wrap items-center gap-x-2 gap-y-1 pt-0.5 text-[11px] text-muted-foreground">
+            <span className="flex shrink-0 items-center gap-1.5">
+              <span className={cn("h-1.5 w-1.5 rounded-full", STATUS_DOT[c.status])} />
+              {STATUS_LABEL[c.status]}
+            </span>
+
+            {isAdmin && c.owner ? (
+              <>
+                <span className="text-muted-foreground/40">·</span>
+                <span className="truncate">{c.owner.full_name.split(" ")[0]}</span>
+              </>
+            ) : null}
+
+            {c.next_action_at ? (
+              <span
+                className={cn(
+                  "shrink-0 rounded-full px-1.5 py-px text-[10px] font-medium ring-1 ring-inset",
+                  overdue
+                    ? "bg-amber-500/15 text-amber-300 ring-amber-500/25"
+                    : "text-muted-foreground ring-border",
+                )}
+              >
+                {formatDate(c.next_action_at)}
+              </span>
+            ) : null}
+          </div>
+        </div>
+      </Link>
+    </li>
   );
 }
 

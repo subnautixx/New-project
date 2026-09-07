@@ -43,7 +43,9 @@ export function InboxShell({
     if (initialConversationId && conversations.some((c) => c.id === initialConversationId)) {
       return initialConversationId;
     }
-    return conversations[0]?.id ?? null;
+    // Sem `?c=`, nada é aberto neste primeiro render. Em tela larga o efeito
+    // abaixo abre a primeira conversa logo depois de montar; no celular não.
+    return null;
   });
   const [showDetails, setShowDetails] = useState(false);
   const [threadToken, setThreadToken] = useState(0);
@@ -135,6 +137,29 @@ export function InboxShell({
     };
   }, [scheduleRefresh]);
 
+  /**
+   * Em tela larga, abre a primeira conversa sozinho — senão a área principal,
+   * que ocupa dois terços da tela, ficaria vazia à toa.
+   *
+   * No celular não. Lá a lista e a conversa dividem a mesma tela: abrir a
+   * primeira automaticamente escondia a lista, e quem entrava na inbox caía
+   * dentro de uma conversa que não escolheu, tendo que voltar para achar a
+   * certa.
+   *
+   * Só na montagem, e só quando nada foi escolhido — depois disso quem manda
+   * é o clique. Fica fora do render para não divergir entre servidor e
+   * navegador, que é onde a hidratação quebraria.
+   */
+  useEffect(() => {
+    setSelectedId((current) => {
+      if (current !== null) return current;
+      if (!window.matchMedia("(min-width: 768px)").matches) return null;
+      return conversationsRef.current[0]?.id ?? null;
+    });
+    // Só na montagem: reabrir a primeira conversa a cada atualização da lista
+    // arrancaria a pessoa de onde ela está.
+  }, []);
+
   // A conversa aberta pode sumir da lista (transferida para outro consignador).
   useEffect(() => {
     if (selectedId && !conversations.some((c) => c.id === selectedId)) {
@@ -183,7 +208,12 @@ export function InboxShell({
             users={users}
             isAdmin={isAdmin}
             currentUserId={currentUserId}
-            onBack={() => setSelectedId(null)}
+            onBack={() => {
+              setSelectedId(null);
+              // Tira o `?c=` junto: senão recarregar a página no celular jogava
+              // de volta para dentro da conversa que a pessoa acabou de fechar.
+              window.history.replaceState(null, "", "/inbox");
+            }}
             onToggleDetails={() => setShowDetails((v) => !v)}
             refreshToken={threadToken}
           />
