@@ -53,4 +53,29 @@ describe("compressIfNeeded", () => {
     expect(changed).toBe(false);
     expect(file).toBe(original);
   });
+
+  /**
+   * HEIC é o padrão de foto do iPhone e o WhatsApp não aceita. A tentativa de
+   * conversão acontece mesmo com o arquivo pequeno — não é questão de tamanho,
+   * é de formato.
+   *
+   * Aqui no Node não existe `createImageBitmap`, então o que dá para fixar é o
+   * contrato da falha: nunca estourar, e devolver o original para a validação
+   * recusar com a mensagem dela.
+   */
+  it("não quebra quando o navegador não decodifica a imagem", async () => {
+    const original = fakeFile("IMG_4821.HEIC", "image/heic", 2 * 1024 * 1024);
+    const { file, changed } = await compressIfNeeded(original);
+
+    expect(changed).toBe(false);
+    expect(file).toBe(original);
+  });
+
+  it("não tenta converter arquivo que não é imagem", async () => {
+    const original = fakeFile("planilha.xlsx", "application/vnd.ms-excel", 1024);
+    const { file, changed } = await compressIfNeeded(original);
+
+    expect(changed).toBe(false);
+    expect(file).toBe(original);
+  });
 });

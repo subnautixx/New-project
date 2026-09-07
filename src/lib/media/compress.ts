@@ -20,6 +20,24 @@ const MAX_DIMENSION = 2560;
 /** Do melhor para o pior; para no primeiro que couber. */
 const QUALITY_STEPS = [0.92, 0.85, 0.75, 0.65, 0.55];
 
+/**
+ * Formatos de foto que o WhatsApp não aceita mas que vale converter para JPEG.
+ *
+ * HEIC é o caso de todo dia: é o padrão de foto do iPhone. Antes a foto era
+ * recusada mesmo cabendo no tamanho, e a pessoa não tinha o que fazer além de
+ * converter por fora.
+ *
+ * GIF fica de fora de propósito: converter para JPEG mataria a animação sem
+ * avisar. Melhor recusar e a pessoa entender o porquê.
+ */
+const CONVERTIBLE_IMAGE_TYPES = [
+  "image/heic",
+  "image/heif",
+  "image/avif",
+  "image/tiff",
+  "image/bmp",
+];
+
 export interface CompressResult {
   file: File;
   /** Verdadeiro quando o arquivo precisou ser reduzido. */
@@ -36,15 +54,27 @@ function canvasToBlob(canvas: HTMLCanvasElement, quality: number): Promise<Blob 
  */
 export async function compressIfNeeded(file: File): Promise<CompressResult> {
   const kind = resolveMediaKind(file.type);
-  const limit = kind ? LIMIT_FOR_KIND[kind] : null;
+  const limit = LIMIT_FOR_KIND.image;
 
-  if (kind !== "image" || limit === null || file.size <= limit) {
-    return { file, changed: false };
+  const imagemNaoSuportada = CONVERTIBLE_IMAGE_TYPES.includes(
+    file.type.split(";")[0]?.trim().toLowerCase() ?? "",
+  );
+
+  if (!imagemNaoSuportada) {
+    // Formato aceito que já cabe: devolve intacto, sem perder qualidade à toa.
+    if (kind !== "image" || file.size <= limit) return { file, changed: false };
   }
 
-  // `from-image` respeita a orientação do EXIF: sem isso, foto tirada em pé
-  // chega deitada do outro lado.
-  const bitmap = await createImageBitmap(file, { imageOrientation: "from-image" });
+  let bitmap: ImageBitmap;
+
+  try {
+    // `from-image` respeita a orientação do EXIF: sem isso, foto tirada em pé
+    // chega deitada do outro lado.
+    bitmap = await createImageBitmap(file, { imageOrientation: "from-image" });
+  } catch {
+    // Navegador não decodifica este formato. Quem recusa é a validação.
+    return { file, changed: false };
+  }
 
   const scale = Math.min(1, MAX_DIMENSION / Math.max(bitmap.width, bitmap.height));
   const width = Math.round(bitmap.width * scale);

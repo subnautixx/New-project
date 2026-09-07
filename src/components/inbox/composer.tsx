@@ -72,24 +72,34 @@ export function Composer({
     setError(null);
 
     const aceitos: File[] = [];
-    const recusados: string[] = [];
+    const recusados: { nome: string; motivo: string }[] = [];
 
     for (const original of chosen) {
       // Foto acima do limite é encolhida em vez de recusada — o limite é da
       // Meta e não dá para aumentar, mas quase toda foto cabe depois de
-      // reduzida.
+      // reduzida. Vídeo e documento não dá para encolher aqui.
       const { file } = await compressIfNeeded(original);
       const validation = validateMedia(file.type, file.size);
 
-      if (validation.ok) aceitos.push(file);
-      else recusados.push(original.name);
+      if (validation.ok) {
+        aceitos.push(file);
+      } else {
+        // A validação já sabe o motivo exato — "acima do limite de 16 MB para
+        // vídeo" é acionável, "formato ou tamanho fora do aceito" não é. Antes
+        // esse motivo era descartado e todo mundo recebia a frase genérica.
+        recusados.push({
+          nome: original.name,
+          motivo: validation.error ?? "Formato não aceito pelo WhatsApp.",
+        });
+      }
     }
 
-    if (recusados.length > 0) {
+    const primeiro = recusados[0];
+    if (primeiro) {
       setError(
         recusados.length === 1
-          ? `${recusados[0]} não pôde ser enviado: formato ou tamanho fora do aceito pelo WhatsApp.`
-          : `${recusados.length} arquivos não puderam ser enviados: formato ou tamanho fora do aceito pelo WhatsApp.`,
+          ? `${primeiro.nome} — ${primeiro.motivo}`
+          : `${recusados.length} arquivos não foram aceitos. ${primeiro.nome} — ${primeiro.motivo}`,
       );
     }
 

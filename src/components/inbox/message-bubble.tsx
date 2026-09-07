@@ -103,9 +103,13 @@ function MediaContent({ message }: { message: ThreadMessage }) {
       return (
         <a
           href={url}
-          // A URL de objeto não tem nome; sem isto o arquivo seria salvo com
-          // um identificador aleatório em vez do nome que o cliente mandou.
-          download={message.media_filename ?? "documento"}
+          // PDF abre para leitura: recibo, laudo e CRLV a pessoa quer ver, não
+          // guardar. Os outros formatos o navegador não exibe, então baixa — e
+          // aí o `download` é obrigatório, porque a URL de objeto não tem nome
+          // e o arquivo seria salvo como um identificador aleatório.
+          {...(message.media_mime_type === "application/pdf"
+            ? { target: "_blank", rel: "noreferrer" }
+            : { download: message.media_filename ?? "documento" })}
           className="flex items-center gap-2.5 rounded-lg bg-black/20 px-2.5 py-2 transition-colors hover:bg-black/30"
         >
           <FileText className="h-5 w-5 shrink-0 opacity-70" />
