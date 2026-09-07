@@ -67,23 +67,29 @@ export function opusDurationSeconds(buffer: ArrayBuffer | Uint8Array): number {
 /**
  * Escolhe o melhor formato de gravação disponível no navegador.
  *
- * Preferimos o que o WhatsApp já aceita direto. WebM entra por último porque
- * exige o remux acima — funciona, mas é trabalho extra que não precisamos
- * fazer no Firefox ou no Safari.
+ * A ordem é por Opus, não por "quem evita trabalho". Ogg/Opus é o formato que o
+ * próprio WhatsApp usa em áudio, e é o que a Cloud API aceita sem reclamar.
+ *
+ * MP4 fica por último de propósito. O MediaRecorder grava MP4 fragmentado, e a
+ * Meta recusa esse arquivo com o código 131053 ("Media upload error"). Antes o
+ * MP4 vinha antes do WebM porque dispensava o remux; quando o Chrome passou a
+ * oferecer `audio/mp4`, todo áudio gravado no Chrome caiu nesse ramo e parou de
+ * ser entregue. Só o Safari chega aqui embaixo hoje, por não gravar mais nada.
  */
 export function pickRecordingMimeType(
   isSupported: (type: string) => boolean,
 ): { mimeType: string; needsRemux: boolean } | null {
-  const nativeCandidates = ["audio/ogg;codecs=opus", "audio/ogg", "audio/mp4", "audio/aac"];
+  const candidates: { mimeType: string; needsRemux: boolean }[] = [
+    { mimeType: "audio/ogg;codecs=opus", needsRemux: false },
+    { mimeType: "audio/ogg", needsRemux: false },
+    { mimeType: "audio/webm;codecs=opus", needsRemux: true },
+    { mimeType: "audio/webm", needsRemux: true },
+    { mimeType: "audio/mp4", needsRemux: false },
+    { mimeType: "audio/aac", needsRemux: false },
+  ];
 
-  for (const candidate of nativeCandidates) {
-    if (isSupported(candidate)) return { mimeType: candidate, needsRemux: false };
-  }
-
-  const webmCandidates = ["audio/webm;codecs=opus", "audio/webm"];
-
-  for (const candidate of webmCandidates) {
-    if (isSupported(candidate)) return { mimeType: candidate, needsRemux: true };
+  for (const candidate of candidates) {
+    if (isSupported(candidate.mimeType)) return candidate;
   }
 
   return null;

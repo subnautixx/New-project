@@ -74,6 +74,18 @@ export function describeSendError(code: string | null, rawMessage: string | null
     };
   }
 
+  // 131053: a Meta baixou o arquivo mas não conseguiu processá-lo. Reenviar o
+  // mesmo arquivo dá exatamente o mesmo resultado — o que muda a sorte é trocar
+  // o formato. Chega em inglês ("Media upload error") e não diz nada disso.
+  if (c === "131053") {
+    return {
+      message:
+        "O WhatsApp não aceitou este arquivo. Tente enviar em outro formato — foto em JPG ou PNG, vídeo em MP4.",
+      retryable: false,
+      needsAdmin: false,
+    };
+  }
+
   if (TRANSIENT_CODES.has(c)) {
     return {
       message: "Instabilidade na conexão com o WhatsApp. A mensagem não foi enviada.",

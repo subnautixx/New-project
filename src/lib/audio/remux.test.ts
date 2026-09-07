@@ -117,7 +117,30 @@ describe("pickRecordingMimeType", () => {
     });
   });
 
-  it("usa mp4 direto no Safari", () => {
+  /**
+   * Regressão do bug que derrubou o envio de áudio em produção.
+   *
+   * Este é o Chrome de hoje, medido no Chromium 141: grava WebM/Opus e também
+   * `audio/mp4`. A versão anterior escolhia o MP4 por dispensar o remux, e a
+   * Meta recusava todo áudio com o código 131053. Tem que sair Opus.
+   */
+  it("escolhe webm com remux no Chrome, mesmo com mp4 disponível", () => {
+    const supported = new Set(["audio/mp4", "audio/webm;codecs=opus", "audio/webm"]);
+    expect(pickRecordingMimeType((t) => supported.has(t))).toEqual({
+      mimeType: "audio/webm;codecs=opus",
+      needsRemux: true,
+    });
+  });
+
+  it("cai para webm com remux quando não há mp4", () => {
+    const supported = new Set(["audio/webm;codecs=opus", "audio/webm"]);
+    expect(pickRecordingMimeType((t) => supported.has(t))).toEqual({
+      mimeType: "audio/webm;codecs=opus",
+      needsRemux: true,
+    });
+  });
+
+  it("usa mp4 no Safari, onde não existe outra opção", () => {
     const supported = new Set(["audio/mp4"]);
     expect(pickRecordingMimeType((t) => supported.has(t))).toEqual({
       mimeType: "audio/mp4",
@@ -125,12 +148,11 @@ describe("pickRecordingMimeType", () => {
     });
   });
 
-  it("cai para webm com remux no Chrome", () => {
-    const supported = new Set(["audio/webm;codecs=opus", "audio/webm"]);
-    expect(pickRecordingMimeType((t) => supported.has(t))).toEqual({
-      mimeType: "audio/webm;codecs=opus",
-      needsRemux: true,
-    });
+  it("nunca escolhe mp4 havendo qualquer caminho para Opus", () => {
+    for (const opus of ["audio/ogg;codecs=opus", "audio/ogg", "audio/webm;codecs=opus", "audio/webm"]) {
+      const supported = new Set(["audio/mp4", "audio/aac", opus]);
+      expect(pickRecordingMimeType((t) => supported.has(t))?.mimeType).toBe(opus);
+    }
   });
 
   it("devolve null quando nada serve", () => {
