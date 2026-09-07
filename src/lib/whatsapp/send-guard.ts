@@ -3,6 +3,7 @@ import "server-only";
 import { NextResponse } from "next/server";
 import type { ApiActor } from "@/lib/auth/api";
 import type { createSupabaseServerClient } from "@/lib/supabase/server";
+import { requiresTemplateForWindow } from "@/lib/domain/service-window";
 import type { LeadStatus } from "@/lib/types/database";
 import { getAccountWithSecrets, userCanSendFromAccount } from "./accounts";
 import type { AccountWithSecrets } from "./accounts";
@@ -82,14 +83,20 @@ export async function authorizeConversationSend(
 
   // Regra da Meta: fora da janela de 24h só template aprovado é aceito.
   // O CRM avisa em vez de tentar contornar.
-  if (!options.allowOutsideWindow && isWindowExpired(conversation.service_window_expires_at)) {
+  const semJanela = conversation.service_window_expires_at === null;
+
+  if (!options.allowOutsideWindow && requiresTemplateForWindow(conversation.service_window_expires_at)) {
     return {
       ok: false,
       response: NextResponse.json(
         {
           error: "service_window_expired",
-          message:
-            "A janela de 24 horas expirou. Só é possível reabrir a conversa com um template aprovado pela Meta.",
+          // Os dois casos exigem template, mas por motivos diferentes — e dizer
+          // "passaram 24 horas desde a última mensagem" para quem nunca recebeu
+          // mensagem nenhuma só confunde quem está atendendo.
+          message: semJanela
+            ? "Este cliente ainda não enviou nenhuma mensagem. Pelas regras da Meta, o primeiro contato precisa ser um modelo aprovado."
+            : "A janela de 24 horas expirou. Só é possível reabrir a conversa com um modelo aprovado pela Meta.",
         },
         { status: 422 },
       ),
@@ -120,6 +127,4 @@ export async function authorizeConversationSend(
   };
 }
 
-export function isWindowExpired(expiresAt: string | null): boolean {
-  return Boolean(expiresAt && new Date(expiresAt) <= new Date());
-}
+export { requiresTemplateForWindow as requiresTemplate };

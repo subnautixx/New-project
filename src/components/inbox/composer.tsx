@@ -4,7 +4,7 @@ import { AlertTriangle, Loader2, Paperclip, SendHorizonal, X } from "lucide-reac
 import { useEffect, useRef, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
-import { describeServiceWindow } from "@/lib/domain/service-window";
+import { describeServiceWindow, requiresApprovedTemplate } from "@/lib/domain/service-window";
 import { compressIfNeeded } from "@/lib/media/compress";
 import { createSupabaseBrowserClient } from "@/lib/supabase/client";
 import type { ConversationListItem, ThreadMessage, UserRef } from "@/lib/types/views";
@@ -62,7 +62,11 @@ export function Composer({
   }, []);
 
   const janela = describeServiceWindow(windowExpiresAt, agora);
-  const windowExpired = janela.state === "fechada";
+  // Janela fechada e cliente que nunca escreveu caem no mesmo lugar: só modelo
+  // aprovado sai. O texto explica qual dos dois é, porque a saída é a mesma mas
+  // o motivo não.
+  const precisaModelo = requiresApprovedTemplate(janela.state);
+  const nuncaEscreveu = janela.state === "sem-janela";
 
   async function pickFile(event: React.ChangeEvent<HTMLInputElement>) {
     const chosen = Array.from(event.target.files ?? []);
@@ -286,15 +290,23 @@ export function Composer({
     }
   }
 
-  if (windowExpired) {
+  if (precisaModelo) {
     return (
       <div className="shrink-0 space-y-2.5 border-t border-border bg-surface px-3 py-3">
         <div className="flex items-start gap-2.5 rounded-lg bg-amber-500/[0.08] px-3 py-2.5 text-xs leading-relaxed text-amber-200/90 ring-1 ring-inset ring-amber-500/20">
           <AlertTriangle className="mt-px h-4 w-4 shrink-0 text-amber-400" />
-          <p>
-            A janela de 24 horas expirou. Pelas regras da Meta, só é possível reabrir esta conversa
-            com um template aprovado — ou aguardar o cliente enviar uma nova mensagem.
-          </p>
+          {nuncaEscreveu ? (
+            <p>
+              Este cliente ainda não enviou nenhuma mensagem. Pelas regras da Meta, o primeiro
+              contato precisa ser um modelo aprovado — depois que ele responder, a conversa fica
+              livre por 24 horas.
+            </p>
+          ) : (
+            <p>
+              A janela de 24 horas expirou. Pelas regras da Meta, só é possível reabrir esta conversa
+              com um modelo aprovado — ou aguardar o cliente enviar uma nova mensagem.
+            </p>
+          )}
         </div>
 
         <TemplateDialog

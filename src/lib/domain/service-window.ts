@@ -49,3 +49,36 @@ export function describeServiceWindow(
 
   return { state: "acabando", minutesLeft, label };
 }
+
+/**
+ * Só dá para escrever livremente dentro da janela.
+ *
+ * Duas situações exigem modelo aprovado, e é fácil confundi-las com uma só:
+ *
+ * - `fechada`: o cliente escreveu, mas já passaram 24 horas.
+ * - `sem-janela`: o cliente NUNCA escreveu. É o caso do prospect cadastrado a
+ *   partir de um anúncio, e é justamente aí que a loja quer dar o primeiro
+ *   passo. A janela nunca abriu, então a primeira mensagem tem que ser modelo.
+ *
+ * Antes só a primeira era tratada. Sem janela era lido como "tudo certo": a
+ * pessoa digitava, enviava, e a Meta recusava depois — com um aviso falando em
+ * "24 horas desde a última mensagem do cliente" que não fazia sentido nenhum
+ * para alguém que nunca mandou mensagem.
+ */
+export function requiresApprovedTemplate(state: WindowState): boolean {
+  return state === "fechada" || state === "sem-janela";
+}
+
+/**
+ * A mesma pergunta, a partir do valor cru do banco.
+ *
+ * O servidor decide pelo timestamp e a interface decide pelo estado; as duas
+ * respostas precisam ser sempre iguais, então derivam daqui. Este módulo não
+ * importa `server-only` de propósito: a regra é a mesma dos dois lados.
+ */
+export function requiresTemplateForWindow(
+  expiresAt: string | null,
+  now: Date = new Date(),
+): boolean {
+  return requiresApprovedTemplate(describeServiceWindow(expiresAt, now).state);
+}
