@@ -96,7 +96,12 @@ export function NewContactForm({
       return Number.isFinite(parsed) && parsed > 0 ? parsed : null;
     };
 
-    await supabase.from("vehicles").insert({
+    // O cliente já existe daqui para baixo. O que falhar agora não desfaz o
+    // cadastro — mas precisa aparecer, senão a pessoa sai da tela achando que
+    // gravou o veículo e a conversa, e descobre o contrário depois.
+    const pendencias: string[] = [];
+
+    const { error: vehicleError } = await supabase.from("vehicles").insert({
       contact_id: contact.id,
       brand: String(form.get("brand") ?? "").trim() || null,
       model: String(form.get("model") ?? "").trim() || null,
@@ -110,6 +115,8 @@ export function NewContactForm({
       is_primary: true,
     });
 
+    if (vehicleError) pendencias.push("os dados do veículo");
+
     // A foto só pode ser enviada agora: antes disso não havia cliente a quem
     // vinculá-la. Se falhar, o cadastro continua válido — sem foto.
     if (photo) {
@@ -117,11 +124,24 @@ export function NewContactForm({
     }
 
     if (accountId !== NO_ACCOUNT) {
-      await supabase.from("conversations").insert({
+      const { error: conversationError } = await supabase.from("conversations").insert({
         contact_id: contact.id,
         whatsapp_account_id: accountId,
         assigned_user_id: currentUserId,
       });
+
+      // Sem conversa o cliente não aparece na inbox e não há como mandar a
+      // primeira mensagem — que costuma ser o motivo do cadastro.
+      if (conversationError) pendencias.push("a conversa no WhatsApp");
+    }
+
+    if (pendencias.length > 0) {
+      toast.error(
+        `Cliente cadastrado, mas ${pendencias.join(" e ")} não foram salvos. Edite a ficha para completar.`,
+      );
+      router.push(`/clientes/${contact.id}`);
+      router.refresh();
+      return;
     }
 
     toast.success("Cliente cadastrado.");

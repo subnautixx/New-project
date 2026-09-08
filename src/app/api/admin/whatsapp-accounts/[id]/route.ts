@@ -51,21 +51,58 @@ export async function PATCH(request: NextRequest, context: { params: Promise<{ i
   }
 
   // Rotação de token: o valor antigo é sobrescrito e nunca registrado.
+  //
+  // Falhar em silêncio aqui é o pior caso do sistema: quem troca um token
+  // expirado sai daqui achando que resolveu, o envio continua quebrado, e a
+  // suspeita cai na Meta em vez de na gravação que não aconteceu.
   if (input.accessToken) {
-    await admin.from("whatsapp_account_secrets").upsert({
+    const { error: secretError } = await admin.from("whatsapp_account_secrets").upsert({
       whatsapp_account_id: id,
       access_token: input.accessToken,
       updated_at: new Date().toISOString(),
     });
+
+    if (secretError) {
+      return NextResponse.json(
+        {
+          error: "secret_failed",
+          message: "O token NÃO foi alterado. Tente de novo antes de enviar mensagens.",
+        },
+        { status: 500 },
+      );
+    }
   }
 
   if (input.userIds) {
-    await admin.from("user_whatsapp_permissions").delete().eq("whatsapp_account_id", id);
+    // Apaga e reinsere. Se a reinserção falhasse em silêncio, todo mundo
+    // perderia o acesso a este número e ninguém saberia por quê.
+    const { error: deleteError } = await admin
+      .from("user_whatsapp_permissions")
+      .delete()
+      .eq("whatsapp_account_id", id);
+
+    if (deleteError) {
+      return NextResponse.json(
+        { error: "permissions_failed", message: "As liberações de acesso não foram alteradas." },
+        { status: 500 },
+      );
+    }
 
     if (input.userIds.length > 0) {
-      await admin.from("user_whatsapp_permissions").insert(
+      const { error: insertError } = await admin.from("user_whatsapp_permissions").insert(
         input.userIds.map((userId) => ({ user_id: userId, whatsapp_account_id: id })),
       );
+
+      if (insertError) {
+        return NextResponse.json(
+          {
+            error: "permissions_failed",
+            message:
+              "As liberações antigas foram removidas e as novas não puderam ser salvas. Refaça a seleção de quem pode usar este número.",
+          },
+          { status: 500 },
+        );
+      }
     }
   }
 

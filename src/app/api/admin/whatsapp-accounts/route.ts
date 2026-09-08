@@ -75,21 +75,52 @@ export async function POST(request: NextRequest) {
     );
   }
 
-  await admin.from("whatsapp_account_secrets").insert({
+  // Sem token o número não envia nada. Se esta gravação falhar em silêncio, a
+  // tela mostra um número "conectado" que nunca vai funcionar, e a falha só
+  // aparece na primeira tentativa de envio — longe daqui, difícil de ligar à
+  // causa. Melhor desfazer o cadastro e dizer o que houve.
+  const { error: secretError } = await admin.from("whatsapp_account_secrets").insert({
     whatsapp_account_id: account.id,
     access_token: input.accessToken,
   });
+
+  if (secretError) {
+    await admin.from("whatsapp_accounts").delete().eq("id", account.id);
+
+    return NextResponse.json(
+      {
+        error: "secret_failed",
+        message: "Não foi possível guardar o token deste número. Tente cadastrar de novo.",
+      },
+      { status: 500 },
+    );
+  }
 
   const userIds = new Set(input.userIds);
   if (input.defaultOwnerUserId) userIds.add(input.defaultOwnerUserId);
 
   if (userIds.size > 0) {
-    await admin.from("user_whatsapp_permissions").insert(
+    const { error: permissionError } = await admin.from("user_whatsapp_permissions").insert(
       [...userIds].map((userId) => ({
         user_id: userId,
         whatsapp_account_id: account.id,
       })),
     );
+
+    // O número existe e funciona; só as liberações falharam. Não desfaz o
+    // cadastro por isso — mas também não finge que deu tudo certo, senão
+    // alguém vai passar a tarde sem entender por que não consegue enviar.
+    if (permissionError) {
+      return NextResponse.json(
+        {
+          id: account.id,
+          warning: "permissions_failed",
+          message:
+            "Número cadastrado, mas as liberações de acesso não foram salvas. Ajuste quem pode usar este número em Configurações · WhatsApps.",
+        },
+        { status: 207 },
+      );
+    }
   }
 
   await writeAuditLog({
