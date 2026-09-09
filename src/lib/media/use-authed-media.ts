@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 
 /**
  * Carregamento de binário vindo de rota autenticada.
@@ -46,42 +46,63 @@ export function useNearViewport<T extends HTMLElement>() {
   return { ref, near };
 }
 
+interface MediaState {
+  request?: object;
+  /** Qual endereço este resultado representa. */
+  url: string | null;
+  objectUrl: string | null;
+  failed: boolean;
+}
+
+const EMPTY: MediaState = { url: null, objectUrl: null, failed: false };
+
 /**
  * Baixa `url` e devolve um endereço local para as tags usarem.
  * `enabled` em `false` não busca nada — combina com `useNearViewport`.
+ *
+ * O resultado é sempre amarrado ao endereço pedido AGORA: ao trocar de foto, o
+ * chamador recebe `null` no mesmo render, sem um instante mostrando (ou
+ * baixando com o nome novo) a imagem anterior, e sem herdar o erro da foto
+ * anterior.
  */
 export function useAuthedObjectUrl(url: string | null, enabled: boolean) {
-  const [objectUrl, setObjectUrl] = useState<string | null>(null);
-  const [failed, setFailed] = useState(false);
+  const [state, setState] = useState<MediaState>(EMPTY);
+  const request = useMemo(() => ({ url, enabled }), [url, enabled]);
 
   useEffect(() => {
     if (!enabled || !url) return;
 
     let active = true;
     let created: string | null = null;
+    const controller = new AbortController();
 
     void (async () => {
       try {
-        const response = await fetch(url);
+        const response = await fetch(url, { signal: controller.signal });
         if (!response.ok) throw new Error(String(response.status));
 
         const blob = await response.blob();
         if (!active) return;
 
         created = URL.createObjectURL(blob);
-        setObjectUrl(created);
+        setState({ request, url, objectUrl: created, failed: false });
       } catch {
-        if (active) setFailed(true);
+        if (active) setState({ request, url, objectUrl: null, failed: true });
       }
     })();
 
     return () => {
       active = false;
+      controller.abort();
       // Sem isto, uma conversa longa com muitas fotos deixaria dezenas de
       // megabytes presos em URLs de objeto até recarregar a página.
       if (created) URL.revokeObjectURL(created);
     };
-  }, [url, enabled]);
+  }, [url, enabled, request]);
 
-  return { objectUrl, failed };
+  // Só entrega o que pertence ao endereço atual. Sem esta comparação, o
+  // resultado da foto anterior continuaria visível até o efeito rodar.
+  const current = enabled && state.request === request ? state : EMPTY;
+
+  return { objectUrl: current.objectUrl, failed: current.failed };
 }

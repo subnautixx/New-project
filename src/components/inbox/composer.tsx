@@ -1,13 +1,16 @@
 "use client";
+/* eslint-disable @next/next/no-img-element -- Miniaturas usam URLs blob locais, sem otimização no servidor. */
 
-import { AlertTriangle, Loader2, Paperclip, SendHorizonal, X } from "lucide-react";
+import { AlertTriangle, FileText, Loader2, Paperclip, SendHorizonal, X } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { describeServiceWindow, requiresApprovedTemplate } from "@/lib/domain/service-window";
+import { clearDraftIf, readDraft, writeDraft } from "@/lib/inbox/drafts";
 import { compressIfNeeded } from "@/lib/media/compress";
 import { createSupabaseBrowserClient } from "@/lib/supabase/client";
 import type { ConversationListItem, ThreadMessage, UserRef } from "@/lib/types/views";
+import { cn } from "@/lib/utils";
 import { ACCEPTED_MIME_TYPES, validateMedia } from "@/lib/whatsapp/media";
 import { AudioRecorder } from "./audio-recorder";
 import { QuickReplies } from "./quick-replies";
@@ -43,14 +46,73 @@ export function Composer({
   onPending,
   onPendingDone,
 }: Props) {
-  const [text, setText] = useState("");
-  const [files, setFiles] = useState<File[]>([]);
+  const conversationId = conversation.id;
+
+  // Leitura inicial segura no servidor: `readDraft` devolve "" quando não há
+  // `sessionStorage`, então o primeiro render combina com a hidratação.
+  const [text, setTextState] = useState("");
+  const [files, setFilesState] = useState<File[]>([]);
   /** Quando manda vários: "enviando 2 de 5". */
   const [progress, setProgress] = useState<{ done: number; total: number } | null>(null);
   const [sending, setSending] = useState(false);
+  /** Comprimindo/validando o que acabou de entrar — segura uma segunda leva. */
+  const [processing, setProcessing] = useState(false);
+  const [dragging, setDragging] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+
+  /**
+   * Espelhos síncronos do estado.
+   *
+   * O React aplica `setState` quando quer; aqui há decisões que precisam valer
+   * NO MESMO instante — o teto de 10 arquivos, o bloqueio de duas levas no
+   * mesmo tique e o rascunho, que tem de estar gravado mesmo se o componente
+   * desmontar no meio de um envio.
+   */
+  const filesRef = useRef<File[]>([]);
+  const processingRef = useRef(false);
+  const sendingRef = useRef(false);
+  const textRef = useRef(text);
+  const mountedRef = useRef(false);
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => { mountedRef.current = false; };
+  }, []);
+  /**
+   * Conversa/usuário do render ATUAL. Um envio lento carrega no fecho a
+   * conversa de onde saiu; escrever no rascunho por esse valor gravaria o texto
+   * da conversa nova na chave da antiga.
+   */
+  const abertaRef = useRef({ userId: currentUserId, conversationId });
+  abertaRef.current = { userId: currentUserId, conversationId };
+
+  /** Toda escrita de texto grava o rascunho na hora, sem depender de efeito. */
+  function setText(next: string | ((current: string) => string)) {
+    const value = typeof next === "function" ? next(textRef.current) : next;
+    const alvo = abertaRef.current;
+    textRef.current = value;
+    writeDraft(alvo.userId, alvo.conversationId, value);
+    setTextState(value);
+  }
+
+  function setFiles(next: File[]) {
+    filesRef.current = next;
+    setFilesState(next);
+  }
+
+  // Trocar de conversa: carrega o rascunho DAQUELA conversa. A escrita não
+  // acontece mais em efeito — era isso que fazia o texto da conversa anterior
+  // ser gravado na nova logo depois da troca.
+  useEffect(() => {
+    const guardado = readDraft(currentUserId, conversationId);
+    textRef.current = guardado;
+    setTextState(guardado);
+    filesRef.current = [];
+    setFilesState([]);
+    setError(null);
+    setProgress(null);
+  }, [currentUserId, conversationId]);
 
   const windowExpiresAt = conversation.service_window_expires_at;
   // Recalcula a cada minuto: um aviso de "faltam 40 min" congelado na tela é
@@ -68,50 +130,122 @@ export function Composer({
   const precisaModelo = requiresApprovedTemplate(janela.state);
   const nuncaEscreveu = janela.state === "sem-janela";
 
-  async function pickFile(event: React.ChangeEvent<HTMLInputElement>) {
-    const chosen = Array.from(event.target.files ?? []);
-    event.target.value = ""; // permite escolher o mesmo arquivo de novo
-    if (chosen.length === 0) return;
+  /** A janela pode fechar entre o render e o clique — conferimos no handler. */
+  const janelaFechadaAgora = () =>
+    requiresApprovedTemplate(describeServiceWindow(windowExpiresAt, new Date()).state);
 
+  /**
+   * Caminho único de entrada de arquivo: botão de anexo, colar e arrastar.
+   * Todos passam pela mesma compressão, pela mesma validação de tipo/tamanho e
+   * pelo mesmo teto de 10 arquivos.
+   */
+  async function addFiles(chosen: File[]) {
+    if (chosen.length === 0) return;
+    // Trava síncrona: dois `drop` no mesmo tique não passam os dois. Um
+    // `if (processing)` sobre o estado deixaria ambos entrarem.
+    if (processingRef.current || sendingRef.current) return;
+    if (janelaFechadaAgora()) {
+      setError("A janela de 24 horas fechou. Reabra a conversa com um modelo aprovado.");
+      return;
+    }
+
+    processingRef.current = true;
+    setProcessing(true);
     setError(null);
 
     const aceitos: File[] = [];
     const recusados: { nome: string; motivo: string }[] = [];
 
-    for (const original of chosen) {
-      // Foto acima do limite é encolhida em vez de recusada — o limite é da
-      // Meta e não dá para aumentar, mas quase toda foto cabe depois de
-      // reduzida. Vídeo e documento não dá para encolher aqui.
-      const { file } = await compressIfNeeded(original);
-      const validation = validateMedia(file.type, file.size);
+    try {
+      for (const original of chosen) {
+        let preparado = original;
 
-      if (validation.ok) {
-        aceitos.push(file);
-      } else {
-        // A validação já sabe o motivo exato — "acima do limite de 16 MB para
-        // vídeo" é acionável, "formato ou tamanho fora do aceito" não é. Antes
-        // esse motivo era descartado e todo mundo recebia a frase genérica.
-        recusados.push({
-          nome: original.name,
-          motivo: validation.error ?? "Formato não aceito pelo WhatsApp.",
-        });
+        try {
+          // Foto acima do limite é encolhida em vez de recusada — o limite é da
+          // Meta e não dá para aumentar, mas quase toda foto cabe depois de
+          // reduzida. Vídeo e documento não dá para encolher aqui.
+          const resultado = await compressIfNeeded(original);
+          preparado = resultado.file;
+        } catch {
+          recusados.push({
+            nome: original.name,
+            motivo: "Não foi possível preparar este arquivo para envio.",
+          });
+          continue;
+        }
+
+        const validation = validateMedia(preparado.type, preparado.size);
+
+        if (validation.ok) {
+          aceitos.push(preparado);
+        } else {
+          // A validação já sabe o motivo exato — "acima do limite de 16 MB para
+          // vídeo" é acionável, "formato ou tamanho fora do aceito" não é.
+          recusados.push({
+            nome: original.name,
+            motivo: validation.error ?? "Formato não aceito pelo WhatsApp.",
+          });
+        }
       }
+    } finally {
+      processingRef.current = false;
+      setProcessing(false);
     }
 
+    // Cálculo puro, fora de qualquer atualizador: o espaço vem do espelho
+    // síncrono, que já refletiu qualquer remoção feita durante a compressão —
+    // arquivo removido no meio não volta.
+    const espaco = Math.max(0, MAX_FILES - filesRef.current.length);
+    const entram = aceitos.slice(0, espaco);
+    const excedente = aceitos.length - entram.length;
+
+    if (entram.length > 0) setFiles([...filesRef.current, ...entram]);
+
+    const avisos: string[] = [];
     const primeiro = recusados[0];
     if (primeiro) {
-      setError(
+      avisos.push(
         recusados.length === 1
           ? `${primeiro.nome} — ${primeiro.motivo}`
           : `${recusados.length} arquivos não foram aceitos. ${primeiro.nome} — ${primeiro.motivo}`,
       );
     }
 
-    setFiles((prev) => [...prev, ...aceitos].slice(0, MAX_FILES));
+    // Passar do teto avisa em vez de sumir com os arquivos em silêncio.
+    if (excedente > 0) {
+      avisos.push(
+        `Só é possível anexar ${MAX_FILES} arquivos por vez. ${excedente} ${
+          excedente === 1 ? "arquivo ficou de fora" : "arquivos ficaram de fora"
+        }.`,
+      );
+    }
+
+    if (avisos.length > 0) setError(avisos.join(" "));
+  }
+
+  async function pickFile(event: React.ChangeEvent<HTMLInputElement>) {
+    const chosen = Array.from(event.target.files ?? []);
+    event.target.value = ""; // permite escolher o mesmo arquivo de novo
+    await addFiles(chosen);
+  }
+
+  /** Colar: só intercepta quando vêm arquivos — texto normal continua colando. */
+  function handlePaste(event: React.ClipboardEvent<HTMLTextAreaElement>) {
+    const pasted = Array.from(event.clipboardData?.files ?? []);
+    if (pasted.length === 0) return;
+    event.preventDefault();
+    void addFiles(pasted);
+  }
+
+  function handleDrop(event: React.DragEvent<HTMLDivElement>) {
+    event.preventDefault();
+    setDragging(false);
+    const dropped = Array.from(event.dataTransfer?.files ?? []);
+    void addFiles(dropped);
   }
 
   function removeFile(index: number) {
-    setFiles((prev) => prev.filter((_, i) => i !== index));
+    setFiles(filesRef.current.filter((_, i) => i !== index));
   }
 
   async function uploadAndSend(chosen: File, caption: string): Promise<boolean> {
@@ -121,7 +255,7 @@ export function Composer({
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
-        conversationId: conversation.id,
+        conversationId,
         filename: chosen.name,
         mimeType: chosen.type,
         sizeBytes: chosen.size,
@@ -155,7 +289,7 @@ export function Composer({
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
-        conversationId: conversation.id,
+        conversationId,
         path,
         mimeType: chosen.type,
         filename: chosen.name,
@@ -183,7 +317,7 @@ export function Composer({
     const response = await fetch("/api/messages/send", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ conversationId: conversation.id, text: body, clientRef }),
+      body: JSON.stringify({ conversationId, text: body, clientRef }),
     });
 
     // Em sucesso `message` é o registro salvo; em erro, o texto do motivo.
@@ -202,42 +336,89 @@ export function Composer({
     return true;
   }
 
-  async function send() {
-    const body = text.trim();
-    if ((!body && files.length === 0) || sending) return;
+  /**
+   * Limpa o campo e o rascunho SÓ se o texto ainda for a revisão que saiu.
+   *
+   * Enquanto a mensagem viaja, a pessoa continua digitando; e pode até trocar
+   * de conversa e voltar, desmontando o componente. Comparar antes de apagar é
+   * o que impede o envio de levar embora o que veio depois.
+   */
+  function limparSeIntacto(enviadoUserId: string, enviadaConversa: string, revisao: string) {
+    // O rascunho é comparado e limpo mesmo se a pessoa já estiver em outra
+    // conversa (ou se o componente tiver desmontado no meio do envio).
+    clearDraftIf(enviadoUserId, enviadaConversa, revisao);
 
+    const aberta = abertaRef.current;
+    if (aberta.conversationId !== enviadaConversa || aberta.userId !== enviadoUserId) return;
+    // A instância desmontada não pode gravar seu texto antigo por cima de um
+    // rascunho criado por uma nova instância da mesma conversa.
+    if (!mountedRef.current) return;
+    if (textRef.current === revisao) {
+      textRef.current = "";
+      setTextState("");
+    }
+  }
+
+  async function send() {
+    const revisao = textRef.current;
+    const body = revisao.trim();
+    // Processando anexo ainda é envio pela metade: esperar evita mandar sem o
+    // arquivo que a pessoa acabou de soltar.
+    if ((!body && filesRef.current.length === 0) || sendingRef.current || processingRef.current) {
+      return;
+    }
+    if (janelaFechadaAgora()) {
+      setError("A janela de 24 horas fechou. Reabra a conversa com um modelo aprovado.");
+      return;
+    }
+
+    const daConversa = conversationId;
+    const doUsuario = currentUserId;
+
+    sendingRef.current = true;
     setSending(true);
     setError(null);
 
     // Anexo continua esperando a resposta: o upload tem estado próprio na tela,
     // e um balão provisório sem a mídia carregada só confundiria.
-    if (files.length > 0) {
-      const total = files.length;
+    if (filesRef.current.length > 0) {
+      const aEnviar = [...filesRef.current];
+      const total = aEnviar.length;
       setProgress({ done: 0, total });
+
+      let legendaJaFoi = false;
 
       try {
         // Um arquivo por mensagem — a Cloud API não aceita várias mídias na
         // mesma. A legenda vai só na primeira, como no WhatsApp.
-        for (const [index, item] of files.entries()) {
-          const ok = await uploadAndSend(item, index === 0 ? body : "");
+        for (const [index, item] of aEnviar.entries()) {
+          const legenda = legendaJaFoi ? "" : body;
+          const ok = await uploadAndSend(item, legenda);
 
-          if (!ok) {
-            // Para na primeira falha e mantém o que ainda não foi: reenviar o
-            // que já chegou duplicaria mensagem para o cliente.
-            setFiles(files.slice(index));
-            return;
+          // Para na primeira falha e mantém o que ainda não foi: reenviar o
+          // que já chegou duplicaria mensagem para o cliente.
+          if (!ok) return;
+
+          // Confirmado: sai da fila na hora. Se o PRÓXIMO estourar uma
+          // exceção, este não volta a aparecer nem é reenviado.
+          setFiles(filesRef.current.filter((f) => f !== item));
+
+          if (legenda) {
+            // A legenda foi junto do primeiro arquivo; do segundo em diante ela
+            // não pode se repetir, nem mesmo se algo falhar no meio.
+            legendaJaFoi = true;
+            limparSeIntacto(doUsuario, daConversa, revisao);
           }
 
           setProgress({ done: index + 1, total });
         }
 
-        setText("");
-        setFiles([]);
         textareaRef.current?.focus();
       } catch {
         setError("Sem conexão com o servidor.");
       } finally {
         setProgress(null);
+        sendingRef.current = false;
         setSending(false);
       }
       return;
@@ -247,11 +428,10 @@ export function Composer({
     // reconhece a mesma tentativa em vez de mandar duas mensagens ao cliente.
     const clientRef = crypto.randomUUID();
 
-    // O balão aparece antes da ida ao servidor, e o campo esvazia junto — quem
-    // atende segue escrevendo a próxima linha sem esperar a rede.
+    // O balão provisório aparece na hora, mas o texto FICA no campo até o
+    // servidor confirmar: trocar de conversa ou recarregar no meio do envio
+    // não pode apagar o que a pessoa escreveu.
     onPending(clientRef, body);
-    setText("");
-    textareaRef.current?.focus();
 
     let ok = false;
     try {
@@ -260,16 +440,26 @@ export function Composer({
       setError("Sem conexão com o servidor.");
     } finally {
       onPendingDone(clientRef);
+      sendingRef.current = false;
       setSending(false);
     }
 
-    // Falhou: o texto volta para o campo, senão o que a pessoa escreveu some
-    // junto com o balão e ela precisa digitar tudo de novo.
-    if (!ok) setText((current) => (current.length > 0 ? current : body));
+    if (ok) {
+      limparSeIntacto(doUsuario, daConversa, revisao);
+      textareaRef.current?.focus();
+    }
   }
 
   /** Áudio gravado vai direto, como no WhatsApp — sem passo de confirmação. */
   async function sendRecording(recorded: File) {
+    // Gravar enquanto uma leva de anexos é comprimida atropelaria a fila.
+    if (sendingRef.current || processingRef.current) return;
+    if (janelaFechadaAgora()) {
+      setError("A janela de 24 horas fechou. Reabra a conversa com um modelo aprovado.");
+      return;
+    }
+
+    sendingRef.current = true;
     setSending(true);
     setError(null);
 
@@ -278,6 +468,7 @@ export function Composer({
     } catch {
       setError("Sem conexão com o servidor.");
     } finally {
+      sendingRef.current = false;
       setSending(false);
     }
   }
@@ -310,7 +501,7 @@ export function Composer({
         </div>
 
         <TemplateDialog
-          conversationId={conversation.id}
+          conversationId={conversationId}
           accountId={conversation.whatsapp_account_id}
           onSent={onSent}
         />
@@ -319,7 +510,28 @@ export function Composer({
   }
 
   return (
-    <div className="shrink-0 border-t border-border bg-surface px-3 py-2.5">
+    <div
+      onDragOver={(event) => {
+        // Só reage a arquivo: arrastar texto selecionado não vira anexo.
+        if (!event.dataTransfer?.types?.includes("Files")) return;
+        event.preventDefault();
+        setDragging(true);
+      }}
+      onDragLeave={(event) => {
+        if (event.currentTarget.contains(event.relatedTarget as Node | null)) return;
+        setDragging(false);
+      }}
+      onDrop={handleDrop}
+      className={cn(
+        "relative shrink-0 border-t border-border bg-surface px-3 py-2.5",
+        dragging && "ring-2 ring-inset ring-amber-400/70",
+      )}
+    >
+      {dragging ? (
+        <div className="pointer-events-none absolute inset-0 z-10 flex items-center justify-center bg-surface/90 text-xs font-medium text-amber-200">
+          Solte para anexar (até {MAX_FILES} arquivos)
+        </div>
+      ) : null}
       {janela.state === "acabando" ? (
         <p className="mb-2 flex items-center gap-2 rounded-lg bg-amber-500/[0.08] px-2.5 py-2 text-xs text-amber-200/90 ring-1 ring-inset ring-amber-500/20">
           <AlertTriangle className="h-3.5 w-3.5 shrink-0 text-amber-400" />
@@ -359,13 +571,13 @@ export function Composer({
             )}
           </div>
 
-          <ul className="max-h-40 space-y-1 overflow-y-auto">
+          <ul className="max-h-44 space-y-1 overflow-y-auto">
             {files.map((item, index) => (
               <li
-                key={`${item.name}-${index}`}
-                className="flex items-center gap-2 rounded-lg bg-surface-muted px-2.5 py-2 text-xs ring-1 ring-inset ring-border"
+                key={`${item.name}-${item.size}-${index}`}
+                className="flex items-center gap-2 rounded-lg bg-surface-muted px-2 py-1.5 text-xs ring-1 ring-inset ring-border"
               >
-                <Paperclip className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+                <Thumb file={item} />
                 <span className="min-w-0 flex-1 truncate font-medium">{item.name}</span>
                 <span className="shrink-0 tabular-nums text-muted-foreground">
                   {(item.size / (1024 * 1024)).toFixed(1)} MB
@@ -393,17 +605,22 @@ export function Composer({
           className="hidden"
           accept={ACCEPTED_MIME_TYPES.join(",")}
           onChange={(e) => void pickFile(e)}
+          aria-label="Anexar arquivo"
         />
 
         <Button
           variant="ghost"
           size="icon"
           onClick={() => fileInputRef.current?.click()}
-          disabled={sending}
-          title="Anexar arquivo"
+          disabled={sending || processing}
+          title="Anexar arquivo (ou cole/arraste aqui)"
           className="shrink-0 text-muted-foreground hover:text-foreground"
         >
-          <Paperclip className="h-4 w-4" />
+          {processing ? (
+            <Loader2 className="h-4 w-4 animate-spin" />
+          ) : (
+            <Paperclip className="h-4 w-4" />
+          )}
           <span className="sr-only">Anexar arquivo</span>
         </Button>
 
@@ -420,13 +637,17 @@ export function Composer({
           }}
         />
 
-        <AudioRecorder disabled={sending} onRecorded={(f) => void sendRecording(f)} />
+        <AudioRecorder
+          disabled={sending || processing}
+          onRecorded={(f) => void sendRecording(f)}
+        />
 
         <Textarea
           ref={textareaRef}
           value={text}
           onChange={(e) => setText(e.target.value.slice(0, MAX_LENGTH))}
           onKeyDown={handleKeyDown}
+          onPaste={handlePaste}
           // Texto curto de propósito: no celular sobram ~165px depois dos
           // quatro botões, e "Escreva uma mensagem…" quebrava em duas linhas
           // dentro de um campo de uma linha só — a segunda ficava cortada.
@@ -438,7 +659,7 @@ export function Composer({
 
         <Button
           onClick={() => void send()}
-          disabled={sending || (text.trim().length === 0 && files.length === 0)}
+          disabled={sending || processing || (text.trim().length === 0 && files.length === 0)}
           size="icon"
           title="Enviar (Enter)"
           className="shrink-0 rounded-full"
@@ -452,5 +673,43 @@ export function Composer({
         </Button>
       </div>
     </div>
+  );
+}
+
+/**
+ * Miniatura do anexo antes de enviar. A URL de objeto nasce e morre junto do
+ * item: remover um arquivo libera a memória dele na hora, sem esperar recarga.
+ */
+function Thumb({ file }: { file: File }) {
+  const [url, setUrl] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!file.type.startsWith("image/")) return;
+    const created = URL.createObjectURL(file);
+    setUrl(created);
+    return () => {
+      URL.revokeObjectURL(created);
+      setUrl(null);
+    };
+  }, [file]);
+
+  if (url) {
+    return (
+      <img
+        src={url}
+        alt=""
+        className="h-9 w-9 shrink-0 rounded object-cover ring-1 ring-inset ring-border"
+      />
+    );
+  }
+
+  return (
+    <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded bg-secondary text-muted-foreground">
+      {file.type.startsWith("video/") || file.type.startsWith("audio/") ? (
+        <Paperclip className="h-4 w-4" />
+      ) : (
+        <FileText className="h-4 w-4" />
+      )}
+    </span>
   );
 }

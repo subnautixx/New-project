@@ -1,4 +1,5 @@
 "use client";
+/* eslint-disable @next/next/no-img-element -- A mídia é carregada por uma rota autenticada e exibida como blob. */
 
 import { AlertCircle, Check, CheckCheck, Clock, FileText, Mic, Video } from "lucide-react";
 
@@ -41,7 +42,13 @@ const PLACEHOLDER_SIZE: Record<string, string> = {
   document: "h-10 w-48",
 };
 
-function MediaContent({ message }: { message: ThreadMessage }) {
+function MediaContent({
+  message,
+  onOpenImage,
+}: {
+  message: ThreadMessage;
+  onOpenImage?: () => void;
+}) {
   const { ref, near } = useNearViewport<HTMLSpanElement>();
   const { objectUrl: url, failed } = useAuthedObjectUrl(`/api/media/${message.id}`, near);
 
@@ -73,13 +80,22 @@ function MediaContent({ message }: { message: ThreadMessage }) {
     case "image":
     case "sticker":
       return (
-        // eslint-disable-next-line @next/next/no-img-element -- binário vem de rota autenticada, sem otimização do Next
-        <img
-          src={url}
-          alt={message.content ?? "Imagem recebida"}
-          className="max-h-80 w-auto rounded-lg object-contain"
-        />
+        // Botão de verdade, não `<img onClick>`: assim abre com Enter/Espaço e
+        // o leitor de tela anuncia que dá para abrir a foto.
+        <button
+          type="button"
+          onClick={onOpenImage}
+          className="block rounded-lg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
+          aria-label="Abrir imagem em tela cheia"
+        >
+          <img
+            src={url}
+            alt={message.content ?? "Imagem recebida"}
+            className="max-h-80 w-auto cursor-zoom-in rounded-lg object-contain"
+          />
+        </button>
       );
+
 
     case "audio":
       return (
@@ -128,16 +144,24 @@ export function MessageBubble({
   message,
   senderName,
   showSender,
+  onOpenImage,
 }: {
   message: ThreadMessage;
   senderName: string | null;
   showSender: boolean;
+  /** Abre o visualizador nesta foto; a lista de fotos vive na conversa. */
+  onOpenImage?: () => void;
 }) {
   const outbound = message.direction === "outbound";
   const hasMedia = message.message_type !== "text" && message.message_type !== "unsupported";
 
   return (
-    <div className={cn("motion-enter flex w-full", outbound ? "justify-end" : "justify-start")}>
+    <div
+      // A thread usa este marcador para reancorar a rolagem depois de carregar
+      // mensagens anteriores.
+      data-mid={message.id}
+      className={cn("motion-enter flex w-full", outbound ? "justify-end" : "justify-start")}
+    >
       <div
         className={cn(
           // O canto reto do lado do remetente faz as vezes da "rabicho" do
@@ -155,7 +179,7 @@ export function MessageBubble({
 
         {hasMedia ? (
           <div className="mb-1">
-            <MediaContent message={message} />
+            <MediaContent message={message} onOpenImage={onOpenImage} />
           </div>
         ) : null}
 

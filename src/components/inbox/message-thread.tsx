@@ -1,20 +1,34 @@
 "use client";
 
 import { ArrowLeft, Info, Loader2 } from "lucide-react";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { ContactAvatar } from "@/components/crm/contact-avatar";
 import { Button } from "@/components/ui/button";
 import { EmptyState } from "@/components/ui/misc";
 import { STATUS_DOT, STATUS_LABEL } from "@/lib/domain/lead";
 import { dayKey, formatDayDivider } from "@/lib/format";
+import { mergeMessages, oldestCursor, olderThanFilter } from "@/lib/inbox/history";
 import { createSupabaseBrowserClient } from "@/lib/supabase/client";
 import type { ConversationListItem, ThreadMessage, UserRef } from "@/lib/types/views";
 import { cn } from "@/lib/utils";
 import { Composer } from "./composer";
+import { ImageViewer } from "./image-viewer";
 import { MessageBubble } from "./message-bubble";
 import { PendingBubble } from "./pending-bubble";
 
-const PAGE_SIZE = 200;
+/** Primeira carga: o suficiente para a conversa recente caber de uma vez. */
+const PAGE_SIZE = 50;
+/** Cada "carregar anteriores" traz mais um pedaço do mesmo tamanho. */
+const OLDER_PAGE_SIZE = 50;
+/**
+ * Quantas mensagens já visíveis têm o status reconferido a cada atualização.
+ * Sem isto, o "lido" de uma mensagem de duas páginas atrás nunca chegaria: a
+ * atualização só trazia as 50 mais recentes.
+ */
+const STATUS_WINDOW = 300;
+
+const SELECT_COLUMNS =
+  "id, direction, message_type, content, media_id, media_mime_type, media_filename, status, error_message, sent_by_user_id, wa_timestamp, created_at";
 
 interface Props {
   conversation: ConversationListItem;
@@ -40,51 +54,243 @@ export function MessageThread({
   /** Mensagens já escritas que ainda estão indo para o servidor. */
   const [pending, setPending] = useState<{ clientRef: string; text: string }[]>([]);
   const [loading, setLoading] = useState(true);
+  /** Falha da primeira carga: não há nada na tela, então ocupa a tela. */
   const [error, setError] = useState<string | null>(null);
+  /** Falha de atualização: o histórico continua visível, o aviso é discreto. */
+  const [refreshError, setRefreshError] = useState<string | null>(null);
+  const [hasMore, setHasMore] = useState(false);
+  const [loadingOlder, setLoadingOlder] = useState(false);
+  const [olderError, setOlderError] = useState<string | null>(null);
+  /** A foto aberta é guardada por id: prepend e realtime mudam o índice. */
+  const [viewerId, setViewerId] = useState<string | null>(null);
   const bottomRef = useRef<HTMLDivElement>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
+  const contentRef = useRef<HTMLDivElement>(null);
+  const conversationGeneration = useRef(0);
+  const olderLock = useRef(false);
 
   const conversationId = conversation.id;
 
-  const load = useCallback(async () => {
-    const supabase = createSupabaseBrowserClient();
+  /**
+   * Resposta atrasada não pode escrever na tela.
+   *
+   * Duas guardas, porque são dois problemas diferentes: `openConversation`
+   * pega a troca de conversa (inclusive A→B→A, porque a sequência também
+   * muda) e `requestSeq` pega duas buscas da MESMA conversa que voltam fora de
+   * ordem — a mais velha é descartada.
+   */
+  const openConversation = useRef(conversationId);
+  const requestSeq = useRef(0);
+  const mounted = useRef(true);
+  const messagesRef = useRef<ThreadMessage[]>([]);
+  messagesRef.current = messages;
+  /** Uma vez visto o começo da conversa, não há mais "anteriores". */
+  const reachedStart = useRef(false);
 
-    const { data, error: queryError } = await supabase
+  useEffect(() => {
+    mounted.current = true;
+    return () => {
+      mounted.current = false;
+    };
+  }, []);
+
+  const vivo = (pedida: string, seq: number) =>
+    mounted.current && openConversation.current === pedida && requestSeq.current === seq;
+
+  const load = useCallback(async () => {
+    const pedida = conversationId;
+    const seq = ++requestSeq.current;
+    const supabase = createSupabaseBrowserClient();
+    const conhecidas = messagesRef.current;
+
+    const recentes = supabase
       .from("messages")
-      .select(
-        "id, direction, message_type, content, media_id, media_mime_type, media_filename, status, error_message, sent_by_user_id, wa_timestamp, created_at",
-      )
-      .eq("conversation_id", conversationId)
+      .select(SELECT_COLUMNS)
+      .eq("conversation_id", pedida)
       .order("created_at", { ascending: false })
+      .order("id", { ascending: false })
       .limit(PAGE_SIZE);
 
-    if (queryError) {
-      setError("Não foi possível carregar as mensagens.");
+    // As já visíveis são reconferidas por id: é assim que "entregue" vira
+    // "lida" numa mensagem que está longe do fim da conversa.
+    const visiveis = conhecidas.map((m) => m.id);
+    const batches = [];
+    for (let offset = 0; offset < visiveis.length; offset += STATUS_WINDOW) {
+      batches.push(supabase.from("messages").select(SELECT_COLUMNS)
+        .eq("conversation_id", pedida).in("id", visiveis.slice(offset, offset + STATUS_WINDOW)));
+    }
+    const reconferir = Promise.all(batches);
+
+    const [pagina, estados] = await Promise.all([recentes, reconferir]);
+
+    if (!vivo(pedida, seq)) return;
+
+    if (pagina.error) {
+      // Atualização que falha não pode esconder o que já está na tela.
+      if (conhecidas.length > 0) setRefreshError("Não foi possível atualizar agora.");
+      else setError("Não foi possível carregar as mensagens.");
       setLoading(false);
       return;
     }
 
-    // Buscamos as mais recentes e invertemos: a conversa é lida de cima para baixo.
-    setMessages((data ?? []).slice().reverse());
+    let recebidas = (pagina.data ?? []) as ThreadMessage[];
+
+    // Rajada maior que uma página deixaria um buraco entre o que já estava na
+    // tela e o novo bloco. Continuamos puxando para trás até encostar no que
+    // já conhecíamos.
+    const maisNova = conhecidas[conhecidas.length - 1];
+    // Compara pelo par (created_at, id) — só o horário deixaria passar buraco
+    // entre mensagens gravadas no mesmo instante.
+    const depoisDaConhecida = (m: ThreadMessage) =>
+      m.created_at > maisNova!.created_at ||
+      (m.created_at === maisNova!.created_at && m.id > maisNova!.id);
+
+    while (
+      maisNova &&
+      recebidas.length >= PAGE_SIZE &&
+      depoisDaConhecida(recebidas[recebidas.length - 1] as ThreadMessage)
+    ) {
+      const ultima = recebidas[recebidas.length - 1] as ThreadMessage;
+      const { data: extra, error: extraError } = await supabase
+        .from("messages")
+        .select(SELECT_COLUMNS)
+        .eq("conversation_id", pedida)
+        .or(olderThanFilter({ createdAt: ultima.created_at, id: ultima.id }))
+        .order("created_at", { ascending: false })
+        .order("id", { ascending: false })
+        .limit(PAGE_SIZE);
+
+      if (!vivo(pedida, seq)) return;
+      if (extraError) {
+        setRefreshError("Não foi possível atualizar agora. Tente novamente.");
+        setLoading(false);
+        return;
+      }
+      if (!extra || extra.length === 0) break;
+
+      recebidas = [...recebidas, ...(extra as ThreadMessage[])];
+      if (extra.length < PAGE_SIZE) break;
+    }
+
+    const atualizadas = estados.flatMap((batch) => batch.data ?? []) as ThreadMessage[];
+
+    // Recarregar a mesma conversa mescla por id: as páginas antigas que já
+    // estavam na tela continuam lá, e status atualizado substitui a versão
+    // velha sem duplicar nada.
+    setMessages((prev) => mergeMessages(prev, [...recebidas, ...atualizadas]));
+
+    if (reachedStart.current) {
+      // Já vimos o começo: nenhuma atualização pode ressuscitar o botão.
+      setHasMore(false);
+    } else if (conhecidas.length === 0) {
+      const temMais = recebidas.length >= PAGE_SIZE;
+      setHasMore(temMais);
+      if (!temMais) reachedStart.current = true;
+    }
+
     setError(null);
+    setRefreshError(estados.some((batch) => batch.error) ? "Não foi possível atualizar alguns status." : null);
     setLoading(false);
   }, [conversationId]);
 
-  /** Qual conversa já está na tela — não confundir troca com recarga. */
-  const shownConversation = useRef(conversationId);
+  /**
+   * Âncora da rolagem: qual mensagem estava visível e a que distância do topo
+   * do painel. Capturada no instante ANTES de aplicar a página nova — medir
+   * altura antes da busca deixava o realtime consumir a medida no meio.
+   */
+  const anchor = useRef<{ id: string; offset: number } | null>(null);
+
+  function capturarAncora() {
+    const el = scrollRef.current;
+    if (!el) return;
+    const top = el.getBoundingClientRect().top;
+    const node = Array.from(el.querySelectorAll<HTMLElement>("[data-mid]")).find(
+      (candidate) => candidate.getBoundingClientRect().bottom > top,
+    );
+    if (!node) return;
+    anchor.current = {
+      id: node.dataset.mid!,
+      offset: node.getBoundingClientRect().top - el.getBoundingClientRect().top,
+    };
+  }
+
+  function restaurarAncora() {
+    const alvo = anchor.current;
+    const el = scrollRef.current;
+    if (!alvo || !el) return;
+    const node = el.querySelector<HTMLElement>(`[data-mid="${cssEscape(alvo.id)}"]`);
+    if (!node) return;
+    const atual = node.getBoundingClientRect().top - el.getBoundingClientRect().top;
+    el.scrollTop += atual - alvo.offset;
+  }
+
+  const loadOlder = useCallback(async () => {
+    const pedida = conversationId;
+    const cursor = oldestCursor(messagesRef.current);
+    if (!cursor || olderLock.current) return;
+    olderLock.current = true;
+    const generation = conversationGeneration.current;
+
+    setLoadingOlder(true);
+    setOlderError(null);
+
+    const supabase = createSupabaseBrowserClient();
+    const { data, error: queryError } = await supabase
+      .from("messages")
+      .select(SELECT_COLUMNS)
+      .eq("conversation_id", pedida)
+      .or(olderThanFilter(cursor))
+      .order("created_at", { ascending: false })
+      .order("id", { ascending: false })
+      .limit(OLDER_PAGE_SIZE);
+
+    if (!mounted.current) return;
+    if (openConversation.current !== pedida || conversationGeneration.current !== generation) {
+      // Trocou de conversa no meio: o efeito de troca já zera o carregando.
+      return;
+    }
+
+    olderLock.current = false;
+
+    if (queryError) {
+      setOlderError("Não foi possível carregar as mensagens anteriores.");
+      setLoadingOlder(false);
+      return;
+    }
+
+    const page = (data ?? []) as ThreadMessage[];
+
+    // Medida tirada aqui, colada na aplicação: entre uma linha e outra nada
+    // mais pode mexer na altura.
+    capturarAncora();
+    setMessages((prev) => mergeMessages(prev, page));
+
+    if (page.length < OLDER_PAGE_SIZE) {
+      reachedStart.current = true;
+      setHasMore(false);
+    }
+    setLoadingOlder(false);
+  }, [conversationId]);
 
   useEffect(() => {
     // Trocar de conversa mostra o spinner. Recarregar a MESMA conversa não:
     // o conteúdo é trocado por baixo, sem piscar.
-    //
-    // Antes o spinner subia nas duas situações. Como o realtime avisa a cada
-    // mensagem — inclusive as que a própria loja envia —, toda vez que alguém
-    // enviava algo a conversa inteira sumia por um instante e voltava com o
-    // scroll fora do lugar.
-    if (shownConversation.current !== conversationId) {
-      shownConversation.current = conversationId;
+    if (openConversation.current !== conversationId) {
+      conversationGeneration.current += 1;
+      olderLock.current = false;
+      openConversation.current = conversationId;
+      messagesRef.current = [];
       setMessages([]);
       setLoading(true);
+      setHasMore(false);
+      setLoadingOlder(false);
+      setOlderError(null);
+      setRefreshError(null);
+      setError(null);
+      setViewerId(null);
+      reachedStart.current = false;
+      anchor.current = null;
+      stickToBottom.current = true;
     }
 
     void load();
@@ -114,7 +320,28 @@ export function MessageThread({
     stickToBottom.current = el.scrollHeight - el.scrollTop - el.clientHeight < 80;
   }
 
+  // Página antiga entrou no começo: a mensagem que estava sob os olhos volta
+  // exatamente para onde estava.
+  useLayoutEffect(() => {
+    if (anchor.current) restaurarAncora();
+  }, [messages]);
+
+  // Mídia que só termina de carregar depois empurra o texto para baixo. Enquanto
+  // a âncora vale, seguimos recolocando a mensagem no lugar.
   useEffect(() => {
+    const el = contentRef.current;
+    if (!el || typeof ResizeObserver === "undefined") return;
+    const observer = new ResizeObserver(() => {
+      if (!anchor.current) return;
+      restaurarAncora();
+    });
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, [messages.length]);
+
+  useEffect(() => {
+    // Paginando para trás não se salta para o fim.
+    if (anchor.current) return;
     if (!stickToBottom.current) return;
     bottomRef.current?.scrollIntoView({ block: "end" });
   }, [messages.length, pending.length]);
@@ -126,6 +353,13 @@ export function MessageThread({
     },
     [users],
   );
+
+  // O visualizador navega entre as fotos DESTA conversa já carregadas.
+  const images = useMemo(
+    () => messages.filter((m) => m.message_type === "image" || m.message_type === "sticker"),
+    [messages],
+  );
+  const viewerIndex = viewerId ? images.findIndex((img) => img.id === viewerId) : -1;
 
   // No número compartilhado, cada balão precisa dizer quem enviou.
   const showSender = conversation.account?.mode === "shared";
@@ -175,6 +409,10 @@ export function MessageThread({
       <div
         ref={scrollRef}
         onScroll={handleScroll}
+        onWheel={() => { anchor.current = null; }}
+        onTouchStart={() => { anchor.current = null; }}
+        onPointerDown={() => { anchor.current = null; }}
+        onKeyDown={() => { anchor.current = null; }}
         className="chat-canvas min-h-0 flex-1 overflow-y-auto px-3 py-4"
       >
         {loading ? (
@@ -182,14 +420,53 @@ export function MessageThread({
             <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" />
           </div>
         ) : error ? (
-          <EmptyState title="Erro ao carregar" description={error} />
+          <div className="flex h-full flex-col items-center justify-center gap-3">
+            <EmptyState title="Erro ao carregar" description={error} />
+            <Button variant="secondary" size="sm" onClick={() => void load()}>
+              Tentar de novo
+            </Button>
+          </div>
         ) : messages.length === 0 && pending.length === 0 ? (
           <EmptyState
             title="Nenhuma mensagem ainda"
             description="Envie a primeira mensagem para iniciar o atendimento."
           />
         ) : (
-          <div className="mx-auto flex max-w-3xl flex-col gap-1.5">
+          <div ref={contentRef} className="mx-auto flex max-w-3xl flex-col gap-1.5">
+            <div className="mb-1 flex flex-col items-center gap-1.5">
+              {olderError ? (
+                <p role="alert" className="text-[11px] text-destructive">
+                  {olderError}
+                </p>
+              ) : null}
+
+              {hasMore ? (
+                <button
+                  type="button"
+                  onClick={() => void loadOlder()}
+                  disabled={loadingOlder}
+                  className="flex items-center gap-1.5 rounded-full bg-surface/90 px-3 py-1.5 text-[11px] font-medium text-muted-foreground ring-1 ring-inset ring-border transition-colors hover:text-foreground disabled:opacity-60"
+                >
+                  {loadingOlder ? <Loader2 className="h-3 w-3 animate-spin" /> : null}
+                  {loadingOlder
+                    ? "Carregando…"
+                    : olderError
+                      ? "Tentar de novo"
+                      : "Carregar mensagens anteriores"}
+                </button>
+              ) : (
+                <span className="text-[10px] uppercase tracking-wide text-muted-foreground/70">
+                  Início da conversa
+                </span>
+              )}
+            </div>
+
+            {refreshError ? (
+              <p role="status" className="mb-1 text-center text-[11px] text-amber-300/90">
+                {refreshError}
+              </p>
+            ) : null}
+
             {messages.map((message, index) => {
               const previous = messages[index - 1];
               const currentDay = dayKey(message.wa_timestamp ?? message.created_at);
@@ -211,6 +488,7 @@ export function MessageThread({
                     message={message}
                     senderName={senderName(message.sent_by_user_id)}
                     showSender={showSender}
+                    onOpenImage={() => setViewerId(message.id)}
                   />
                 </div>
               );
@@ -225,6 +503,15 @@ export function MessageThread({
         )}
       </div>
 
+      {viewerIndex >= 0 ? (
+        <ImageViewer
+          images={images}
+          index={viewerIndex}
+          onIndexChange={(next) => setViewerId(images[next]?.id ?? null)}
+          onClose={() => setViewerId(null)}
+        />
+      ) : null}
+
       <Composer
         conversation={conversation}
         isAdmin={isAdmin}
@@ -233,10 +520,12 @@ export function MessageThread({
         // O que a própria pessoa acabou de enviar sempre volta para o fim da
         // conversa, mesmo que ela estivesse lendo o histórico.
         onSent={(message) => {
+          anchor.current = null;
           stickToBottom.current = true;
-          setMessages((prev) => [...prev, message]);
+          setMessages((prev) => mergeMessages(prev, [message]));
         }}
         onPending={(clientRef, text) => {
+          anchor.current = null;
           stickToBottom.current = true;
           setPending((prev) => [...prev, { clientRef, text }]);
         }}
@@ -248,3 +537,8 @@ export function MessageThread({
   );
 }
 
+/** `CSS.escape` não existe em todo lugar; o id é um uuid, então basta o básico. */
+function cssEscape(value: string): string {
+  if (typeof CSS !== "undefined" && typeof CSS.escape === "function") return CSS.escape(value);
+  return value.replace(/["\\]/g, "\\$&");
+}
