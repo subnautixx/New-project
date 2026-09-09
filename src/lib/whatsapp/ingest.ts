@@ -144,8 +144,7 @@ export async function processInboundMessage(
       .single();
 
     if (error || !created) {
-      await finishWebhookEvent(admin, event.eventKey, `Falha ao criar contato: ${error?.message}`);
-      return { status: "skipped", reason: "contact_insert_failed" };
+      throw new Error(`Falha ao criar contato: ${error?.message ?? "sem resultado"}`);
     }
 
     contactId = created.id;
@@ -186,8 +185,7 @@ export async function processInboundMessage(
         .maybeSingle();
 
       if (!raced) {
-        await finishWebhookEvent(admin, event.eventKey, `Falha na conversa: ${convError?.message}`);
-        return { status: "skipped", reason: "conversation_failed" };
+        throw new Error(`Falha na conversa: ${convError?.message ?? "sem resultado"}`);
       }
 
       conversationId = raced.id;
@@ -214,10 +212,9 @@ export async function processInboundMessage(
   if (messageError) {
     // Corrida com outra entrega do mesmo webhook: a mensagem já existe.
     const duplicate = messageError.code === "23505";
-    await finishWebhookEvent(admin, event.eventKey, duplicate ? undefined : messageError.message);
-    return duplicate
-      ? { status: "skipped", reason: "duplicate_message" }
-      : { status: "skipped", reason: "message_insert_failed" };
+    if (!duplicate) throw new Error(`Falha ao gravar mensagem: ${messageError.message}`);
+    await finishWebhookEvent(admin, event.eventKey);
+    return { status: "skipped", reason: "duplicate_message" };
   }
 
   // Cliente respondeu: o funil anda sozinho até "respondeu", e só até aí.
@@ -259,8 +256,7 @@ export async function processStatusUpdate(
   });
 
   if (eventError && eventError.code !== "23505") {
-    await finishWebhookEvent(admin, event.eventKey, eventError.message);
-    return { status: "skipped", reason: "event_insert_failed" };
+    throw new Error(`Falha ao gravar status: ${eventError.message}`);
   }
 
   if (shouldApplyStatus(message.status, event.status)) {
