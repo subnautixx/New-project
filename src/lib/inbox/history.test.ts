@@ -38,6 +38,11 @@ describe("cursor", () => {
 });
 
 describe("mergeMessages", () => {
+  it("resposta antiga não desfaz o status de uma tentativa mais recente", () => {
+    const current = msg("a", "2026-01-01T10:00:00Z", { status: "sent", updated_at: "2026-01-01T10:01:00.000002+00:00" });
+    const stale = { ...current, status: "failed" as const, updated_at: "2026-01-01T10:01:00.000001+00:00" };
+    expect(mergeMessages([current], [stale])[0]?.status).toBe("sent");
+  });
   it("acrescenta página antiga no começo sem perder o que já estava", () => {
     const atual = [msg("c", "2026-01-01T12:00:00Z")];
     const antigas = [msg("a", "2026-01-01T10:00:00Z"), msg("b", "2026-01-01T11:00:00Z")];

@@ -48,6 +48,12 @@ export function mergeMessages(
 ): ThreadMessage[] {
   const byId = new Map<string, ThreadMessage>();
   for (const message of current) byId.set(message.id, message);
-  for (const message of incoming) byId.set(message.id, message);
+  for (const message of incoming) {
+    const existing = byId.get(message.id);
+    // updated_at vem do banco com precisão de microssegundos. Não converter
+    // para Date, que perde precisão e confunde duas atualizações no mesmo ms.
+    if (existing?.updated_at && message.updated_at && existing.updated_at > message.updated_at) continue;
+    byId.set(message.id, message);
+  }
   return [...byId.values()].sort(compare);
 }

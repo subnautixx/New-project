@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import "@/test/setup";
-import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { readDraft } from "@/lib/inbox/drafts";
@@ -17,11 +17,16 @@ vi.stubGlobal("fetch", (...args: unknown[]) => fetch(...args));
 
 vi.mock("@/lib/supabase/client", () => ({
   supabase: { auth: { getSession: async () => ({ data: { session: null } }) } },
-  createSupabaseBrowserClient: () => ({
-    storage: {
-      from: () => ({ uploadToSignedUrl: async () => ({ error: null }) }),
-    },
-  }),
+  createSupabaseBrowserClient: () => ({}),
+}));
+
+/** Upload direto ao armazenamento: fingido, com progresso em um passo só. */
+const uploadResultado = { ok: true, error: null as string | null };
+vi.mock("@/lib/media/upload-xhr", () => ({
+  uploadToSignedUrl: async ({ onProgress }: { onProgress?: (p: number) => void }) => {
+    onProgress?.(100);
+    return uploadResultado;
+  },
 }));
 
 vi.mock("@/lib/media/compress", () => ({
@@ -77,7 +82,7 @@ function colarArquivos(arquivos: File[]) {
 }
 
 function respostaOk(body: unknown) {
-  return { ok: true, json: async () => body } as unknown as Response;
+  return { ok: true, status: 201, json: async () => body } as unknown as Response;
 }
 
 beforeEach(() => {
@@ -160,7 +165,7 @@ describe("Composer — envio de texto e rascunho", () => {
     expect(campo().value).toBe("Bom dia!");
     expect(readDraft("user-1", "conv-1")).toBe("Bom dia!");
 
-    envio.resolve(respostaOk({ message: { id: "m1" } }));
+    envio.resolve(respostaOk({ message: { id: "m1", status: "sent" } }));
     await waitFor(() => expect(campo().value).toBe(""));
     expect(readDraft("user-1", "conv-1")).toBe("");
   });
@@ -189,7 +194,7 @@ describe("Composer — envio de texto e rascunho", () => {
     fireEvent.click(screen.getByRole("button", { name: "Enviar" }));
     digitar("já estou escrevendo a próxima");
 
-    envio.resolve(respostaOk({ message: { id: "m1" } }));
+    envio.resolve(respostaOk({ message: { id: "m1", status: "sent" } }));
     await waitFor(() => expect(fetch).toHaveBeenCalled());
     await waitFor(() => expect(campo().value).toBe("já estou escrevendo a próxima"));
     expect(readDraft("user-1", "conv-1")).toBe("já estou escrevendo a próxima");
@@ -218,7 +223,7 @@ describe("Composer — envio de texto e rascunho", () => {
     await waitFor(() => expect(campo().value).toBe(""));
     digitar("texto da B");
 
-    envio.resolve(respostaOk({ message: { id: "m1" } }));
+    envio.resolve(respostaOk({ message: { id: "m1", status: "sent" } }));
 
     // O envio da A limpa só o rascunho da A; a B fica intacta.
     await waitFor(() => expect(readDraft("user-1", "conv-A")).toBe(""));
@@ -247,9 +252,70 @@ describe("Composer — envio de texto e rascunho", () => {
     rerender(<Composer conversation={conversaA} {...props} />);
     await waitFor(() => expect(campo().value).toBe("meio escrito"));
   });
+
+  it("desmontar e remontar durante o envio não apaga o rascunho novo", async () => {
+    const envio = adiada<Response>();
+    fetch.mockReturnValueOnce(envio.promise);
+
+    const conversa = conversaFake({ id: "conv-1" });
+    const props = {
+      isAdmin: false,
+      users: [],
+      currentUserId: "user-1",
+      onSent: vi.fn(),
+      onPending: vi.fn(),
+      onPendingDone: vi.fn(),
+    };
+
+    const primeira = render(<Composer conversation={conversa} {...props} />);
+    digitar("primeira");
+    fireEvent.click(screen.getByRole("button", { name: "Enviar" }));
+
+    // A instância some no meio do envio (troca de tela, remontagem).
+    primeira.unmount();
+    render(<Composer conversation={conversa} {...props} />);
+    await waitFor(() => expect(campo().value).toBe("primeira"));
+    digitar("rascunho novo");
+
+    envio.resolve(respostaOk({ message: { id: "m1", status: "sent" } }));
+
+    // A instância morta não pode escrever "" por cima do que foi digitado depois.
+    await waitFor(() => expect(fetch).toHaveBeenCalled());
+    expect(campo().value).toBe("rascunho novo");
+    expect(readDraft("user-1", "conv-1")).toBe("rascunho novo");
+  });
 });
 
 describe("Composer — envio de anexos", () => {
+  it("resposta perdida mantém o clientRef ao tentar novamente", async () => {
+    fetch.mockRejectedValueOnce(new Error("network"));
+    fetch.mockResolvedValueOnce(respostaOk({ message: { id: "resolved", status: "sent" } }));
+    renderComposer();
+    digitar("mensagem com resposta perdida");
+    fireEvent.click(screen.getByRole("button", { name: "Enviar" }));
+    await screen.findByRole("alert");
+    await waitFor(() => expect(screen.getByRole("button", { name: "Enviar" })).not.toBeDisabled());
+    fireEvent.click(screen.getByRole("button", { name: "Enviar" }));
+    await waitFor(() => expect(campo().value).toBe(""));
+    const refs = fetch.mock.calls.map(([, init]) => JSON.parse(init.body).clientRef);
+    expect(refs).toHaveLength(2);
+    expect(refs[0]).toBe(refs[1]);
+  });
+
+  it("202 mescla o registro pendente e avisa sem anunciar sucesso", async () => {
+    const record = { id: "uncertain", status: "queued" };
+    fetch.mockResolvedValueOnce({ status: 202, ok: true, json: async () => ({
+      error: "send_uncertain", message: "Confira o histórico: envio não confirmado.", messageRecord: record,
+    }) });
+    const onSent = vi.fn();
+    renderComposer({ onSent });
+    digitar("mensagem incerta");
+    fireEvent.click(screen.getByRole("button", { name: "Enviar" }));
+    expect(await screen.findByRole("alert")).toHaveTextContent("envio não confirmado");
+    expect(onSent).toHaveBeenCalledWith(record);
+    expect(fetch).toHaveBeenCalledTimes(1);
+  });
+
   function mockUploadSequence(resultados: boolean[]) {
     let envio = 0;
     fetch.mockImplementation(async (url: string) => {
@@ -261,7 +327,7 @@ describe("Composer — envio de anexos", () => {
       if (!ok) {
         return { ok: false, json: async () => ({ message: "Falhou o segundo." }) } as Response;
       }
-      return respostaOk({ message: { id: `m${envio}` } });
+      return respostaOk({ message: { id: `m${envio}`, status: "sent" } });
     });
   }
 
@@ -297,17 +363,4 @@ describe("Composer — envio de anexos", () => {
     await waitFor(() => expect(screen.getAllByRole("listitem")).toHaveLength(1));
     expect(screen.getByText("b.jpg")).toBeInTheDocument();
   });
-});
-it("resposta de instância desmontada preserva o rascunho escrito ao voltar", async () => {
-  const envio = adiada<Response>();
-  fetch.mockReturnValueOnce(envio.promise);
-  const first = renderComposer();
-  digitar("primeira");
-  fireEvent.click(screen.getByRole("button", { name: "Enviar" }));
-  first.unmount();
-  renderComposer();
-  digitar("novo rascunho após voltar");
-  await act(async () => { envio.resolve(respostaOk({ message: { id: "m1" } })); });
-  expect(readDraft("user-1", "conv-1")).toBe("novo rascunho após voltar");
-  expect(campo().value).toBe("novo rascunho após voltar");
 });

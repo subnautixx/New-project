@@ -2,7 +2,6 @@ import "server-only";
 
 import { serverEnv } from "@/lib/env";
 import { toWhatsappRecipient } from "@/lib/phone";
-import { describeSendError, isRetryableStatus } from "./errors";
 import { countTemplateVariables } from "./template";
 
 const GRAPH_BASE = "https://graph.facebook.com";
@@ -13,6 +12,7 @@ export interface WhatsappCredentials {
 }
 
 export interface SendResult {
+  uncertain?: boolean;
   ok: boolean;
   providerMessageId: string | null;
   errorCode: string | null;
@@ -137,24 +137,23 @@ export async function markMessageAsRead(
   return result.ok;
 }
 
-/** Tentativas totais e espera entre elas. Curto: alguém espera a resposta. */
-const MAX_ATTEMPTS = 3;
-const BACKOFF_MS = [400, 1200];
-
-function sleep(ms: number): Promise<void> {
-  return new Promise((resolve) => setTimeout(resolve, ms));
-}
-
 /**
- * Uma tentativa de envio, sem retentativa.
- * `retryable` diz se vale insistir; quem decide é `postMessage`.
+ * Cada tentativa faz um único POST. O client_ref é local ao CRM e não torna
+ * a API da Meta idempotente; repetir após timeout pode duplicar a entrega.
  */
-async function attemptPost(
+async function postMessage(
   credentials: WhatsappCredentials,
   payload: Record<string, unknown>,
-): Promise<SendResult & { retryable: boolean }> {
-  let response: Response;
+): Promise<SendResult> {
+  const uncertain = (): SendResult => ({
+    uncertain: true,
+    ok: false,
+    providerMessageId: null,
+    errorCode: "delivery_unknown",
+    errorMessage: "Não foi possível confirmar a entrega. Confira a conversa antes de tentar enviar novamente.",
+  });
 
+  let response: Response;
   try {
     response = await fetch(graphUrl(`${credentials.phoneNumberId}/messages`), {
       method: "POST",
@@ -164,74 +163,27 @@ async function attemptPost(
       },
       body: JSON.stringify(payload),
       cache: "no-store",
+      signal: AbortSignal.timeout(30_000),
     });
-  } catch (error) {
-    // Rede caindo é o caso clássico que passa na segunda tentativa.
-    return {
-      ok: false,
-      providerMessageId: null,
-      errorCode: "network_error",
-      errorMessage: error instanceof Error ? error.message : "Falha de rede ao contatar a Meta",
-      retryable: true,
-    };
+  } catch {
+    return uncertain();
   }
 
   const body: unknown = await response.json().catch(() => null);
-
+  if (response.status >= 500 || response.status === 408) return uncertain();
   if (!response.ok) {
-    const { code, message } = extractError(body, `HTTP ${response.status}`);
-    const retryable = describeSendError(code, message).retryable || isRetryableStatus(response.status);
-    return { ok: false, providerMessageId: null, errorCode: code, errorMessage: message, retryable };
+    const error = extractError(body, `HTTP ${response.status}`);
+    return { ok: false, providerMessageId: null, errorCode: error.code, errorMessage: error.message };
   }
 
-  const messageId = (body as { messages?: { id?: string }[] } | null)?.messages?.[0]?.id ?? null;
-
-  return {
-    ok: true,
-    providerMessageId: messageId,
-    errorCode: null,
-    errorMessage: null,
-    retryable: false,
-  };
-}
-
-/**
- * Envia com retentativa curta.
- *
- * Antes, uma oscilação de dois segundos na Meta fazia a mensagem simplesmente
- * não sair. Agora tenta até três vezes, mas só no que adianta repetir: token
- * inválido e número inexistente falham na primeira e param ali.
- *
- * O `client_ref` gravado antes da chamada garante que reenvio não duplica
- * mensagem para o cliente.
- */
-async function postMessage(
-  credentials: WhatsappCredentials,
-  payload: Record<string, unknown>,
-): Promise<SendResult> {
-  let last: SendResult & { retryable: boolean } = {
-    ok: false,
-    providerMessageId: null,
-    errorCode: "unknown",
-    errorMessage: null,
-    retryable: false,
-  };
-
-  for (let attempt = 0; attempt < MAX_ATTEMPTS; attempt++) {
-    last = await attemptPost(credentials, payload);
-
-    if (last.ok || !last.retryable) break;
-
-    const wait = BACKOFF_MS[attempt];
-    if (wait !== undefined) await sleep(wait);
+  // Recibo de leitura confirma a operação sem criar uma nova mensagem.
+  if (payload.status === "read") {
+    return { ok: true, providerMessageId: null, errorCode: null, errorMessage: null };
   }
 
-  return {
-    ok: last.ok,
-    providerMessageId: last.providerMessageId,
-    errorCode: last.errorCode,
-    errorMessage: last.errorMessage,
-  };
+  const id = (body as { messages?: { id?: unknown }[] } | null)?.messages?.[0]?.id;
+  if (typeof id !== "string" || !id.trim()) return uncertain();
+  return { ok: true, providerMessageId: id, errorCode: null, errorMessage: null };
 }
 
 export interface TemplateComponent {

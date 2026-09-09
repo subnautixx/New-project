@@ -1,7 +1,9 @@
+/* eslint-disable @next/next/no-img-element -- URLs blob locais de mídia autenticada. */
 "use client";
-/* eslint-disable @next/next/no-img-element -- A mídia é carregada por uma rota autenticada e exibida como blob. */
 
-import { AlertCircle, Check, CheckCheck, Clock, FileText, Mic, Video } from "lucide-react";
+import { AlertCircle, Check, CheckCheck, Clock, FileText, Loader2, Mic, Video } from "lucide-react";
+
+import { describeRetry } from "@/lib/whatsapp/retry-policy";
 
 import { formatTime } from "@/lib/format";
 import { useAuthedObjectUrl, useNearViewport } from "@/lib/media/use-authed-media";
@@ -19,7 +21,7 @@ function StatusTicks({ message }: { message: ThreadMessage }) {
   const { status } = message;
 
   if (status === "failed") {
-    return <AlertCircle className="h-3.5 w-3.5 text-destructive" aria-label="Falhou" />;
+    return <AlertCircle className="h-3.5 w-3.5 text-red-300" aria-label="Falhou" />;
   }
   if (status === "queued") {
     return <Clock className="h-3.5 w-3.5 opacity-70" aria-label="Enviando" />;
@@ -145,13 +147,23 @@ export function MessageBubble({
   senderName,
   showSender,
   onOpenImage,
+  onRetry,
+  retrying = false,
+  retryError = null,
 }: {
   message: ThreadMessage;
   senderName: string | null;
   showSender: boolean;
   /** Abre o visualizador nesta foto; a lista de fotos vive na conversa. */
   onOpenImage?: () => void;
+  /** Reenvio manual desta mensagem. A conversa é quem fala com o servidor. */
+  onRetry?: () => void;
+  retrying?: boolean;
+  retryError?: string | null;
 }) {
+  // A MESMA política do servidor decide se o botão aparece: só recusa
+  // inequívoca da Meta pode ser reenviada sem risco de mandar duas vezes.
+  const veredito = describeRetry(message);
   const outbound = message.direction === "outbound";
   const hasMedia = message.message_type !== "text" && message.message_type !== "unsupported";
 
@@ -201,10 +213,37 @@ export function MessageBubble({
           <StatusTicks message={message} />
         </div>
 
+        {outbound && message.status === "queued" ? (
+          <p role="status" className="mt-1 text-[11px] text-amber-200">{message.error_message ?? "Envio em confirmação. Aguarde antes de enviar novamente."}</p>
+        ) : null}
         {message.status === "failed" ? (
-          <p className="mt-1 border-t border-destructive/20 pt-1 text-[11px] text-destructive">
-            {message.error_message ?? statusLabel("failed")}
-          </p>
+          <div className="mt-1 space-y-1 border-t border-destructive/20 pt-1">
+            <p className="text-[11px] text-red-300">
+              {message.error_message ?? statusLabel("failed")}
+            </p>
+
+            {veredito.retryable && onRetry ? (
+              <button
+                type="button"
+                onClick={onRetry}
+                disabled={retrying}
+                className="flex items-center gap-1.5 rounded-full bg-destructive/10 px-2 py-1 text-[11px] font-medium text-red-300 transition-colors hover:bg-destructive/20 disabled:opacity-60"
+              >
+                {retrying ? <Loader2 className="h-3 w-3 animate-spin" /> : null}
+                {retrying ? "Reenviando…" : "Tentar novamente"}
+              </button>
+            ) : (
+              // Entrega incerta: oferecer o botão aqui arriscaria mandar a
+              // mesma mensagem duas vezes para o cliente.
+              <p className="text-[11px] text-muted-foreground">{veredito.reason}</p>
+            )}
+
+            {retryError ? (
+              <p role="alert" className="text-[11px] text-red-300">
+                {retryError}
+              </p>
+            ) : null}
+          </div>
         ) : null}
       </div>
     </div>

@@ -8,6 +8,7 @@ import { EmptyState } from "@/components/ui/misc";
 import { STATUS_DOT, STATUS_LABEL } from "@/lib/domain/lead";
 import { dayKey, formatDayDivider } from "@/lib/format";
 import { mergeMessages, oldestCursor, olderThanFilter } from "@/lib/inbox/history";
+import { MESSAGE_SELECT } from "@/lib/messages/outcome";
 import { createSupabaseBrowserClient } from "@/lib/supabase/client";
 import type { ConversationListItem, ThreadMessage, UserRef } from "@/lib/types/views";
 import { cn } from "@/lib/utils";
@@ -21,14 +22,13 @@ const PAGE_SIZE = 50;
 /** Cada "carregar anteriores" traz mais um pedaço do mesmo tamanho. */
 const OLDER_PAGE_SIZE = 50;
 /**
- * Quantas mensagens já visíveis têm o status reconferido a cada atualização.
- * Sem isto, o "lido" de uma mensagem de duas páginas atrás nunca chegaria: a
- * atualização só trazia as 50 mais recentes.
+ * Tamanho de cada lote de reconferência de status. Todas as mensagens já
+ * visíveis são reconferidas, em lotes deste tamanho: é assim que o "lido" de
+ * uma mensagem de várias páginas atrás chega à tela.
  */
 const STATUS_WINDOW = 300;
 
-const SELECT_COLUMNS =
-  "id, direction, message_type, content, media_id, media_mime_type, media_filename, status, error_message, sent_by_user_id, wa_timestamp, created_at";
+const SELECT_COLUMNS = MESSAGE_SELECT;
 
 interface Props {
   conversation: ConversationListItem;
@@ -65,9 +65,12 @@ export function MessageThread({
   const [viewerId, setViewerId] = useState<string | null>(null);
   const bottomRef = useRef<HTMLDivElement>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
+  /** O conteúdo, não o painel: é a altura dele que muda quando chega página. */
   const contentRef = useRef<HTMLDivElement>(null);
+  /** Sobe a cada troca de conversa; invalida buscas de "anteriores" em voo. */
   const conversationGeneration = useRef(0);
   const olderLock = useRef(false);
+  const retryLocks = useRef(new Set<string>());
 
   const conversationId = conversation.id;
 
@@ -116,8 +119,13 @@ export function MessageThread({
     const visiveis = conhecidas.map((m) => m.id);
     const batches = [];
     for (let offset = 0; offset < visiveis.length; offset += STATUS_WINDOW) {
-      batches.push(supabase.from("messages").select(SELECT_COLUMNS)
-        .eq("conversation_id", pedida).in("id", visiveis.slice(offset, offset + STATUS_WINDOW)));
+      batches.push(
+        supabase
+          .from("messages")
+          .select(SELECT_COLUMNS)
+          .eq("conversation_id", pedida)
+          .in("id", visiveis.slice(offset, offset + STATUS_WINDOW)),
+      );
     }
     const reconferir = Promise.all(batches);
 
@@ -162,6 +170,7 @@ export function MessageThread({
 
       if (!vivo(pedida, seq)) return;
       if (extraError) {
+        // Parar em silêncio deixaria um buraco invisível no histórico.
         setRefreshError("Não foi possível atualizar agora. Tente novamente.");
         setLoading(false);
         return;
@@ -189,7 +198,9 @@ export function MessageThread({
     }
 
     setError(null);
-    setRefreshError(estados.some((batch) => batch.error) ? "Não foi possível atualizar alguns status." : null);
+    setRefreshError(
+      estados.some((batch) => batch.error) ? "Não foi possível atualizar alguns status." : null,
+    );
     setLoading(false);
   }, [conversationId]);
 
@@ -203,6 +214,8 @@ export function MessageThread({
   function capturarAncora() {
     const el = scrollRef.current;
     if (!el) return;
+    // A primeira mensagem VISÍVEL, não a primeira da lista: é a que está sob os
+    // olhos que precisa voltar para o mesmo lugar.
     const top = el.getBoundingClientRect().top;
     const node = Array.from(el.querySelectorAll<HTMLElement>("[data-mid]")).find(
       (candidate) => candidate.getBoundingClientRect().bottom > top,
@@ -210,7 +223,7 @@ export function MessageThread({
     if (!node) return;
     anchor.current = {
       id: node.dataset.mid!,
-      offset: node.getBoundingClientRect().top - el.getBoundingClientRect().top,
+      offset: node.getBoundingClientRect().top - top,
     };
   }
 
@@ -227,6 +240,7 @@ export function MessageThread({
   const loadOlder = useCallback(async () => {
     const pedida = conversationId;
     const cursor = oldestCursor(messagesRef.current);
+    // Trava síncrona: dois cliques no mesmo tique não disparam duas buscas.
     if (!cursor || olderLock.current) return;
     olderLock.current = true;
     const generation = conversationGeneration.current;
@@ -276,9 +290,9 @@ export function MessageThread({
     // Trocar de conversa mostra o spinner. Recarregar a MESMA conversa não:
     // o conteúdo é trocado por baixo, sem piscar.
     if (openConversation.current !== conversationId) {
+      openConversation.current = conversationId;
       conversationGeneration.current += 1;
       olderLock.current = false;
-      openConversation.current = conversationId;
       messagesRef.current = [];
       setMessages([]);
       setLoading(true);
@@ -288,6 +302,8 @@ export function MessageThread({
       setRefreshError(null);
       setError(null);
       setViewerId(null);
+      setRetrying({});
+      setRetryErrors({});
       reachedStart.current = false;
       anchor.current = null;
       stickToBottom.current = true;
@@ -326,8 +342,9 @@ export function MessageThread({
     if (anchor.current) restaurarAncora();
   }, [messages]);
 
-  // Mídia que só termina de carregar depois empurra o texto para baixo. Enquanto
-  // a âncora vale, seguimos recolocando a mensagem no lugar.
+  // Mídia que só termina de carregar depois empurra o texto para baixo.
+  // Observamos o CONTEÚDO, não o painel: o painel tem altura fixa e nunca
+  // dispararia. A âncora só sai quando a pessoa mexe na rolagem ou envia algo.
   useEffect(() => {
     const el = contentRef.current;
     if (!el || typeof ResizeObserver === "undefined") return;
@@ -345,6 +362,68 @@ export function MessageThread({
     if (!stickToBottom.current) return;
     bottomRef.current?.scrollIntoView({ block: "end" });
   }, [messages.length, pending.length]);
+
+  /** Reenvio manual: uma mensagem por vez, com erro local no próprio balão. */
+  const [retrying, setRetrying] = useState<Record<string, boolean>>({});
+  const [retryErrors, setRetryErrors] = useState<Record<string, string>>({});
+
+  const retryMessage = useCallback(async (message: ThreadMessage) => {
+    const id = message.id;
+    // Trava por id: dois cliques rápidos não viram duas requisições. O claim
+    // no servidor ainda protege o caso de duas abas.
+    if (retryLocks.current.has(id)) return;
+    retryLocks.current.add(id);
+    const generation = conversationGeneration.current;
+    const active = () => mounted.current && generation === conversationGeneration.current;
+    setRetrying((prev) => ({ ...prev, [id]: true }));
+
+    setRetryErrors((prev) => {
+      const { [id]: _removido, ...resto } = prev;
+      return resto;
+    });
+
+    try {
+      const response = await fetch("/api/messages/retry", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ messageId: id, expectedUpdatedAt: message.updated_at }),
+      });
+
+      const payload = (await response.json().catch(() => null)) as {
+        message?: ThreadMessage | string;
+        messageRecord?: ThreadMessage | null;
+      } | null;
+
+      // Qualquer resposta pode trazer o estado atual da linha — inclusive a
+      // recusa por versão antiga. Mesclamos por id em vez de recarregar tudo.
+      const registro =
+        payload?.messageRecord ??
+        (payload?.message && typeof payload.message !== "string" ? payload.message : null);
+
+      if (!active()) return;
+      if (registro) setMessages((prev) => mergeMessages(prev, [registro]));
+
+      if (!response.ok) {
+        const texto = typeof payload?.message === "string" ? payload.message : null;
+        setRetryErrors((prev) => ({
+          ...prev,
+          [id]: texto ?? "Não foi possível reenviar agora.",
+        }));
+      }
+    } catch {
+      if (active()) {
+        setRetryErrors((prev) => ({ ...prev, [id]: "Sem conexão com o servidor." }));
+      }
+    } finally {
+      retryLocks.current.delete(id);
+      if (active()) {
+        setRetrying((prev) => {
+          const { [id]: _saiu, ...resto } = prev;
+          return resto;
+        });
+      }
+    }
+  }, []);
 
   const senderName = useCallback(
     (userId: string | null) => {
@@ -409,10 +488,20 @@ export function MessageThread({
       <div
         ref={scrollRef}
         onScroll={handleScroll}
-        onWheel={() => { anchor.current = null; }}
-        onTouchStart={() => { anchor.current = null; }}
-        onPointerDown={() => { anchor.current = null; }}
-        onKeyDown={() => { anchor.current = null; }}
+        // Qualquer gesto de rolagem encerra a âncora: a partir daí quem manda
+        // na posição é a pessoa, não o reposicionamento automático.
+        onWheel={() => {
+          anchor.current = null;
+        }}
+        onTouchStart={() => {
+          anchor.current = null;
+        }}
+        onPointerDown={() => {
+          anchor.current = null;
+        }}
+        onKeyDown={() => {
+          anchor.current = null;
+        }}
         className="chat-canvas min-h-0 flex-1 overflow-y-auto px-3 py-4"
       >
         {loading ? (
@@ -489,6 +578,9 @@ export function MessageThread({
                     senderName={senderName(message.sent_by_user_id)}
                     showSender={showSender}
                     onOpenImage={() => setViewerId(message.id)}
+                    onRetry={() => void retryMessage(message)}
+                    retrying={Boolean(retrying[message.id])}
+                    retryError={retryErrors[message.id] ?? null}
                   />
                 </div>
               );
@@ -513,6 +605,7 @@ export function MessageThread({
       ) : null}
 
       <Composer
+        key={`${currentUserId}:${conversationId}`}
         conversation={conversation}
         isAdmin={isAdmin}
         users={users}
@@ -520,6 +613,7 @@ export function MessageThread({
         // O que a própria pessoa acabou de enviar sempre volta para o fim da
         // conversa, mesmo que ela estivesse lendo o histórico.
         onSent={(message) => {
+          if (!mounted.current || openConversation.current !== conversationId) return;
           anchor.current = null;
           stickToBottom.current = true;
           setMessages((prev) => mergeMessages(prev, [message]));

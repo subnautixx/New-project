@@ -1,15 +1,16 @@
-import { NextResponse, type NextRequest } from "next/server";
+import { NextResponse } from "next/server";
 import { z } from "zod";
 import { authorizeRequest } from "@/lib/auth/api";
+const jsonResponse = NextResponse.json;
+export const runtime = "nodejs";
+export const dynamic = "force-dynamic";
 import { rateLimit } from "@/lib/rate-limit";
 import { createSupabaseAdminClient } from "@/lib/supabase/admin";
 import { sendTemplateMessage } from "@/lib/whatsapp/client";
-import { describeSendError } from "@/lib/whatsapp/errors";
 import { renderTemplateBody } from "@/lib/whatsapp/template";
+import { existingAttempt } from "@/lib/messages/deduplicate";
+import { MESSAGE_SELECT, UNCERTAIN_MESSAGE, persistedOutcome } from "@/lib/messages/outcome";
 import { authorizeConversationSend } from "@/lib/whatsapp/send-guard";
-
-export const runtime = "nodejs";
-export const dynamic = "force-dynamic";
 
 const bodySchema = z.object({
   conversationId: z.string().uuid(),
@@ -31,7 +32,7 @@ const bodySchema = z.object({
  * Limite mais apertado que o de texto: template é mensagem de reengajamento, e
  * disparo em volume é exatamente o que as políticas da Meta punem.
  */
-export async function POST(request: NextRequest) {
+export async function POST(request: Request) {
   const auth = await authorizeRequest();
   if (!auth.ok) return auth.response;
 
@@ -39,7 +40,7 @@ export async function POST(request: NextRequest) {
 
   const limit = rateLimit(`template:${actor.id}`, 10, 60_000);
   if (!limit.allowed) {
-    return NextResponse.json(
+    return jsonResponse(
       {
         error: "rate_limited",
         message: "Muitos templates em pouco tempo. Aguarde antes de reabrir outra conversa.",
@@ -50,7 +51,7 @@ export async function POST(request: NextRequest) {
 
   const parsed = bodySchema.safeParse(await request.json().catch(() => null));
   if (!parsed.success) {
-    return NextResponse.json({ error: "invalid_body" }, { status: 400 });
+    return jsonResponse({ error: "invalid_body" }, { status: 400 });
   }
 
   const { conversationId, templateName, languageCode, parameters, bodyText, clientRef } =
@@ -64,15 +65,8 @@ export async function POST(request: NextRequest) {
   const { contactPhone, contactId, account } = guard.context;
   const admin = createSupabaseAdminClient();
 
-  const { data: existing } = await admin
-    .from("messages")
-    .select("id, status, provider_message_id")
-    .eq("client_ref", clientRef)
-    .maybeSingle();
-
-  if (existing) {
-    return NextResponse.json({ message: existing, deduplicated: true }, { status: 200 });
-  }
+  const existing = await existingAttempt(admin, clientRef, conversationId, actor.id);
+  if (existing) return existing;
 
   // Guarda o texto já preenchido: daqui a um mês ninguém lembra o que o
   // template "reengajamento_v2" dizia.
@@ -93,11 +87,15 @@ export async function POST(request: NextRequest) {
       status: "queued",
       client_ref: clientRef,
     })
-    .select("id")
+    .select(MESSAGE_SELECT)
     .single();
 
+  if (insertError?.code === "23505") {
+    const replay = await existingAttempt(admin, clientRef, conversationId, actor.id);
+    return replay ?? jsonResponse({ error: "attempt_conflict" }, { status: 409 });
+  }
   if (insertError || !message) {
-    return NextResponse.json({ error: "message_insert_failed" }, { status: 500 });
+    return jsonResponse({ error: "message_insert_failed" }, { status: 500 });
   }
 
   const result = await sendTemplateMessage(
@@ -108,31 +106,32 @@ export async function POST(request: NextRequest) {
     parameters,
   );
 
-  const { data: updated } = await admin
+  const outcome = persistedOutcome(result);
+
+  const { data: updated, error: updateError } = await admin
     .from("messages")
-    .update({
-      provider_message_id: result.providerMessageId,
-      status: result.ok ? "sent" : "failed",
-      error_code: result.errorCode,
-      // Guarda o texto que a pessoa vai ler, não o jargão da Graph API.
-      error_message: describeSendError(result.errorCode, result.errorMessage).message,
-    })
+    .update(outcome)
     .eq("id", message.id)
-    .select(
-      "id, direction, message_type, content, media_id, media_mime_type, media_filename, status, error_message, sent_by_user_id, wa_timestamp, created_at",
-    )
+    .eq("status", "queued")
+    .eq("updated_at", message.updated_at)
+    .select(MESSAGE_SELECT)
     .single();
 
+  if (updateError || !updated) {
+    return jsonResponse({ error: "persist_failed", message: UNCERTAIN_MESSAGE,
+      messageRecord: { ...message, error_code: "delivery_unknown", error_message: UNCERTAIN_MESSAGE } }, { status: 202 });
+  }
+
   if (!result.ok) {
-    return NextResponse.json(
+    return jsonResponse(
       {
-        error: "send_failed",
-        message: describeSendError(result.errorCode, result.errorMessage).message,
+        error: result.uncertain ? "send_uncertain" : "send_failed",
+        message: outcome.error_message,
         messageRecord: updated,
       },
-      { status: 502 },
+      { status: result.uncertain ? 202 : 502 },
     );
   }
 
-  return NextResponse.json({ message: updated }, { status: 201 });
+  return jsonResponse({ message: updated }, { status: 201 });
 }

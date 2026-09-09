@@ -1,17 +1,18 @@
 "use client";
-/* eslint-disable @next/next/no-img-element -- Miniaturas usam URLs blob locais, sem otimização no servidor. */
 
-import { AlertTriangle, FileText, Loader2, Paperclip, SendHorizonal, X } from "lucide-react";
+import { AlertTriangle, Loader2, Paperclip, SendHorizonal } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { describeServiceWindow, requiresApprovedTemplate } from "@/lib/domain/service-window";
 import { clearDraftIf, readDraft, writeDraft } from "@/lib/inbox/drafts";
 import { compressIfNeeded } from "@/lib/media/compress";
-import { createSupabaseBrowserClient } from "@/lib/supabase/client";
+import { attemptKey, readAttempt, saveAttempt, clearAttempt, readSendResponse, type SendResponse } from "@/lib/messages/send-response";
+import { uploadToSignedUrl } from "@/lib/media/upload-xhr";
 import type { ConversationListItem, ThreadMessage, UserRef } from "@/lib/types/views";
 import { cn } from "@/lib/utils";
 import { ACCEPTED_MIME_TYPES, validateMedia } from "@/lib/whatsapp/media";
+import { AttachmentPreview, type UploadState } from "./attachment-preview";
 import { AudioRecorder } from "./audio-recorder";
 import { QuickReplies } from "./quick-replies";
 import { TemplateDialog } from "./template-dialog";
@@ -33,10 +34,7 @@ interface Props {
   onPendingDone: (clientRef: string) => void;
 }
 
-interface SendResponse {
-  message?: ThreadMessage | string;
-  error?: string;
-}
+type SendOutcome = { consumed: boolean; confirmed: boolean };
 
 export function Composer({
   conversation,
@@ -48,12 +46,17 @@ export function Composer({
 }: Props) {
   const conversationId = conversation.id;
 
-  // Leitura inicial segura no servidor: `readDraft` devolve "" quando não há
-  // `sessionStorage`, então o primeiro render combina com a hidratação.
+  // Começa vazio e o efeito abaixo carrega o rascunho já no cliente: o
+  // primeiro render combina com a hidratação em qualquer caso.
   const [text, setTextState] = useState("");
   const [files, setFilesState] = useState<File[]>([]);
   /** Quando manda vários: "enviando 2 de 5". */
   const [progress, setProgress] = useState<{ done: number; total: number } | null>(null);
+  /**
+   * Progresso REAL por arquivo, medido pelo XMLHttpRequest. A chave é o
+   * próprio File: o índice muda quando um item sai da fila no meio do envio.
+   */
+  const [uploads, setUploads] = useState<Map<File, UploadState>>(new Map());
   const [sending, setSending] = useState(false);
   /** Comprimindo/validando o que acabou de entrar — segura uma segunda leva. */
   const [processing, setProcessing] = useState(false);
@@ -74,10 +77,13 @@ export function Composer({
   const processingRef = useRef(false);
   const sendingRef = useRef(false);
   const textRef = useRef(text);
+  /** Instância desmontada não pode escrever estado nem texto antigo na tela. */
   const mountedRef = useRef(false);
   useEffect(() => {
     mountedRef.current = true;
-    return () => { mountedRef.current = false; };
+    return () => {
+      mountedRef.current = false;
+    };
   }, []);
   /**
    * Conversa/usuário do render ATUAL. Um envio lento carrega no fecho a
@@ -110,6 +116,7 @@ export function Composer({
     setTextState(guardado);
     filesRef.current = [];
     setFilesState([]);
+    setUploads(new Map());
     setError(null);
     setProgress(null);
   }, [currentUserId, conversationId]);
@@ -248,8 +255,22 @@ export function Composer({
     setFiles(filesRef.current.filter((_, i) => i !== index));
   }
 
-  async function uploadAndSend(chosen: File, caption: string): Promise<boolean> {
-    const clientRef = crypto.randomUUID();
+  function marcarUpload(file: File, state: UploadState | null) {
+    setUploads((prev) => {
+      const next = new Map(prev);
+      if (state) next.set(file, state);
+      else next.delete(file);
+      return next;
+    });
+  }
+
+  async function uploadAndSend(chosen: File, caption: string): Promise<SendOutcome> {
+    const key = attemptKey(currentUserId, conversationId, JSON.stringify(["media", chosen.name, chosen.type, chosen.size, chosen.lastModified, caption]));
+    const attempt = readAttempt(key);
+    const { clientRef } = attempt;
+    let path = attempt.path;
+    if (!path) {
+    marcarUpload(chosen, { percent: 0, phase: "upload" });
 
     const urlResponse = await fetch("/api/messages/media/upload-url", {
       method: "POST",
@@ -265,25 +286,41 @@ export function Composer({
     if (!urlResponse.ok) {
       const payload = (await urlResponse.json().catch(() => null)) as { message?: string } | null;
       setError(payload?.message ?? "Não foi possível preparar o envio do arquivo.");
-      return false;
+      marcarUpload(chosen, null);
+      return { consumed: false, confirmed: false };
     }
 
-    const { path, token, bucket } = (await urlResponse.json()) as {
+    const { path: uploadedPath, token, bucket } = (await urlResponse.json()) as {
       path: string;
       token: string;
       bucket: string;
     };
 
     // O arquivo vai direto do navegador para o Storage: não passa pela função
-    // serverless, que aceita poucos megabytes por requisição.
-    const { error: uploadError } = await createSupabaseBrowserClient()
-      .storage.from(bucket)
-      .uploadToSignedUrl(path, token, chosen, { contentType: chosen.type });
+    // serverless, que aceita poucos megabytes por requisição. O XHR informa
+    // quanto já subiu — num vídeo de 16 MB isso é a diferença entre esperar e
+    // achar que travou.
+    const upload = await uploadToSignedUrl({
+      bucket,
+      path: uploadedPath,
+      token,
+      file: chosen,
+      onProgress: (percent) => marcarUpload(chosen, { percent, phase: "upload" }),
+    });
 
-    if (uploadError) {
-      setError("Falha ao enviar o arquivo. Verifique sua conexão.");
-      return false;
+    if (!upload.ok) {
+      setError(upload.error ?? "Falha ao enviar o arquivo. Verifique sua conexão.");
+      marcarUpload(chosen, null);
+      return { consumed: false, confirmed: false };
     }
+
+    path = uploadedPath;
+    saveAttempt(key, { clientRef, path });
+    }
+
+    // 100% do upload não é mensagem entregue: falta o servidor pedir o envio
+    // à Meta e confirmar.
+    marcarUpload(chosen, { percent: 100, phase: "confirming" });
 
     const sendResponse = await fetch("/api/messages/send-media", {
       method: "POST",
@@ -299,41 +336,25 @@ export function Composer({
     });
 
     const payload = (await sendResponse.json().catch(() => null)) as SendResponse | null;
-
-    if (!sendResponse.ok) {
-      setError(
-        typeof payload?.message === "string"
-          ? payload.message
-          : "Não foi possível enviar o arquivo.",
-      );
-      return false;
-    }
-
-    if (payload?.message && typeof payload.message !== "string") onSent(payload.message);
-    return true;
+    const result = readSendResponse(sendResponse.status, payload);
+    marcarUpload(chosen, null);
+    if (result.record) onSent(result.record);
+    if (!result.confirmed) setError(result.notice);
+    if (result.record) clearAttempt(key);
+    return { consumed: Boolean(result.record), confirmed: result.confirmed };
   }
 
-  async function sendText(body: string, clientRef: string): Promise<boolean> {
+  async function sendText(body: string, clientRef: string): Promise<SendOutcome> {
     const response = await fetch("/api/messages/send", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ conversationId, text: body, clientRef }),
     });
-
-    // Em sucesso `message` é o registro salvo; em erro, o texto do motivo.
     const payload = (await response.json().catch(() => null)) as SendResponse | null;
-
-    if (!response.ok) {
-      setError(
-        typeof payload?.message === "string"
-          ? payload.message
-          : "Não foi possível enviar. Tente novamente.",
-      );
-      return false;
-    }
-
-    if (payload?.message && typeof payload.message !== "string") onSent(payload.message);
-    return true;
+    const result = readSendResponse(response.status, payload);
+    if (result.record) onSent(result.record);
+    if (!result.confirmed) setError(result.notice);
+    return { consumed: Boolean(result.record), confirmed: result.confirmed };
   }
 
   /**
@@ -393,11 +414,11 @@ export function Composer({
         // mesma. A legenda vai só na primeira, como no WhatsApp.
         for (const [index, item] of aEnviar.entries()) {
           const legenda = legendaJaFoi ? "" : body;
-          const ok = await uploadAndSend(item, legenda);
+          const result = await uploadAndSend(item, legenda);
 
           // Para na primeira falha e mantém o que ainda não foi: reenviar o
           // que já chegou duplicaria mensagem para o cliente.
-          if (!ok) return;
+          if (!result.consumed) return;
 
           // Confirmado: sai da fila na hora. Se o PRÓXIMO estourar uma
           // exceção, este não volta a aparecer nem é reenviado.
@@ -411,11 +432,12 @@ export function Composer({
           }
 
           setProgress({ done: index + 1, total });
+          if (!result.confirmed) return;
         }
 
         textareaRef.current?.focus();
       } catch {
-        setError("Sem conexão com o servidor.");
+        setError("A conexão caiu e o envio não foi confirmado. Tentar novamente consulta a mesma tentativa.");
       } finally {
         setProgress(null);
         sendingRef.current = false;
@@ -426,25 +448,27 @@ export function Composer({
 
     // Gerado aqui: se a resposta se perder e o usuário reenviar, o backend
     // reconhece a mesma tentativa em vez de mandar duas mensagens ao cliente.
-    const clientRef = crypto.randomUUID();
+    const key = attemptKey(currentUserId, conversationId, JSON.stringify(["text", body]));
+    const { clientRef } = readAttempt(key);
 
     // O balão provisório aparece na hora, mas o texto FICA no campo até o
     // servidor confirmar: trocar de conversa ou recarregar no meio do envio
     // não pode apagar o que a pessoa escreveu.
     onPending(clientRef, body);
 
-    let ok = false;
+    let result: SendOutcome = { consumed: false, confirmed: false };
     try {
-      ok = await sendText(body, clientRef);
+      result = await sendText(body, clientRef);
     } catch {
-      setError("Sem conexão com o servidor.");
+      setError("A conexão caiu e o envio não foi confirmado. Tentar novamente consulta a mesma tentativa.");
     } finally {
       onPendingDone(clientRef);
       sendingRef.current = false;
       setSending(false);
     }
 
-    if (ok) {
+    if (result.consumed) {
+      clearAttempt(key);
       limparSeIntacto(doUsuario, daConversa, revisao);
       textareaRef.current?.focus();
     }
@@ -466,7 +490,7 @@ export function Composer({
     try {
       await uploadAndSend(recorded, "");
     } catch {
-      setError("Sem conexão com o servidor.");
+      setError("A conexão caiu e o envio não foi confirmado. Tentar novamente consulta a mesma tentativa.");
     } finally {
       sendingRef.current = false;
       setSending(false);
@@ -501,6 +525,7 @@ export function Composer({
         </div>
 
         <TemplateDialog
+          currentUserId={currentUserId}
           conversationId={conversationId}
           accountId={conversation.whatsapp_account_id}
           onSent={onSent}
@@ -571,27 +596,15 @@ export function Composer({
             )}
           </div>
 
-          <ul className="max-h-44 space-y-1 overflow-y-auto">
+          <ul className="max-h-72 space-y-1 overflow-y-auto">
             {files.map((item, index) => (
-              <li
+              <AttachmentPreview
                 key={`${item.name}-${item.size}-${index}`}
-                className="flex items-center gap-2 rounded-lg bg-surface-muted px-2 py-1.5 text-xs ring-1 ring-inset ring-border"
-              >
-                <Thumb file={item} />
-                <span className="min-w-0 flex-1 truncate font-medium">{item.name}</span>
-                <span className="shrink-0 tabular-nums text-muted-foreground">
-                  {(item.size / (1024 * 1024)).toFixed(1)} MB
-                </span>
-                <button
-                  type="button"
-                  onClick={() => removeFile(index)}
-                  disabled={sending}
-                  className="shrink-0 rounded p-0.5 text-muted-foreground transition-colors hover:bg-secondary hover:text-foreground"
-                >
-                  <X className="h-3.5 w-3.5" />
-                  <span className="sr-only">Remover {item.name}</span>
-                </button>
-              </li>
+                file={item}
+                upload={uploads.get(item)}
+                disabled={sending}
+                onRemove={() => removeFile(index)}
+              />
             ))}
           </ul>
         </div>
@@ -673,43 +686,5 @@ export function Composer({
         </Button>
       </div>
     </div>
-  );
-}
-
-/**
- * Miniatura do anexo antes de enviar. A URL de objeto nasce e morre junto do
- * item: remover um arquivo libera a memória dele na hora, sem esperar recarga.
- */
-function Thumb({ file }: { file: File }) {
-  const [url, setUrl] = useState<string | null>(null);
-
-  useEffect(() => {
-    if (!file.type.startsWith("image/")) return;
-    const created = URL.createObjectURL(file);
-    setUrl(created);
-    return () => {
-      URL.revokeObjectURL(created);
-      setUrl(null);
-    };
-  }, [file]);
-
-  if (url) {
-    return (
-      <img
-        src={url}
-        alt=""
-        className="h-9 w-9 shrink-0 rounded object-cover ring-1 ring-inset ring-border"
-      />
-    );
-  }
-
-  return (
-    <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded bg-secondary text-muted-foreground">
-      {file.type.startsWith("video/") || file.type.startsWith("audio/") ? (
-        <Paperclip className="h-4 w-4" />
-      ) : (
-        <FileText className="h-4 w-4" />
-      )}
-    </span>
   );
 }

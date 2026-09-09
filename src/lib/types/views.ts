@@ -85,6 +85,12 @@ export type ThreadMessage = Pick<
   | "sent_by_user_id"
   | "wa_timestamp"
   | "created_at"
+  // Os três abaixo sustentam o reenvio manual: `updated_at` é a versão da
+  // linha usada no claim atômico, e os outros dois dizem se a recusa da Meta
+  // foi inequívoca. Nenhum deles carrega segredo.
+  | "updated_at"
+  | "provider_message_id"
+  | "error_code"
 >;
 
 /** Cliente com tudo que a lista e a ficha precisam. */

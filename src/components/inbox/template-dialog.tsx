@@ -1,7 +1,7 @@
 "use client";
 
 import { Loader2 } from "lucide-react";
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -22,6 +22,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import type { ThreadMessage } from "@/lib/types/views";
+import { attemptKey, readAttempt, clearAttempt, readSendResponse, type SendResponse } from "@/lib/messages/send-response";
 import { renderTemplateBody } from "@/lib/whatsapp/template";
 
 interface Template {
@@ -40,10 +41,12 @@ interface Template {
 export function TemplateDialog({
   conversationId,
   accountId,
+  currentUserId,
   onSent,
 }: {
   conversationId: string;
   accountId: string;
+  currentUserId: string;
   onSent: (message: ThreadMessage) => void;
 }) {
   const [open, setOpen] = useState(false);
@@ -52,6 +55,7 @@ export function TemplateDialog({
   const [selectedName, setSelectedName] = useState("");
   const [parameters, setParameters] = useState<string[]>([]);
   const [pending, setPending] = useState(false);
+  const lock = useRef(false);
   const [error, setError] = useState<string | null>(null);
 
   const selected = templates.find((t) => t.name === selectedName) ?? null;
@@ -84,42 +88,37 @@ export function TemplateDialog({
   }
 
   async function submit() {
-    if (!selected || pending) return;
-
+    if (!selected || lock.current) return;
+    lock.current = true;
     setPending(true);
     setError(null);
-
-    const response = await fetch("/api/messages/send-template", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        conversationId,
-        templateName: selected.name,
-        languageCode: selected.language,
-        parameters,
-        bodyText: selected.bodyText ?? undefined,
-        clientRef: crypto.randomUUID(),
-      }),
-    });
-
-    const payload = (await response.json().catch(() => null)) as {
-      message?: ThreadMessage | string;
-    } | null;
-
-    if (!response.ok) {
-      setError(
-        typeof payload?.message === "string" ? payload.message : "Não foi possível enviar.",
-      );
+    const key = attemptKey(currentUserId, conversationId, JSON.stringify(["template", selected.name, selected.language, parameters]));
+    const { clientRef } = readAttempt(key);
+    try {
+      const response = await fetch("/api/messages/send-template", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          conversationId, templateName: selected.name, languageCode: selected.language,
+          parameters, bodyText: selected.bodyText ?? undefined, clientRef,
+        }),
+      });
+      const payload = (await response.json().catch(() => null)) as SendResponse | null;
+      const result = readSendResponse(response.status, payload);
+      if (result.record) {
+        onSent(result.record);
+        clearAttempt(key);
+        setSelectedName("");
+        setParameters([]);
+      }
+      if (result.confirmed) setOpen(false);
+      else setError(result.notice);
+    } catch {
+      setError("Envio não confirmado. Tentar novamente consulta a mesma tentativa.");
+    } finally {
+      lock.current = false;
       setPending(false);
-      return;
     }
-
-    if (payload?.message && typeof payload.message !== "string") onSent(payload.message);
-
-    setPending(false);
-    setOpen(false);
-    setSelectedName("");
-    setParameters([]);
   }
 
   const missingParameter = parameters.some((p) => p.trim().length === 0);

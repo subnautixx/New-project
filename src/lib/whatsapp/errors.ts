@@ -103,7 +103,44 @@ export function describeSendError(code: string | null, rawMessage: string | null
   };
 }
 
-/** Resposta HTTP da Meta que vale reenviar mesmo sem código conhecido. */
+/** Resposta HTTP da Meta que indica instabilidade, não recusa do conteúdo. */
 export function isRetryableStatus(status: number): boolean {
   return status === 408 || status === 429 || status >= 500;
+}
+
+/**
+ * Códigos em que a Meta disse claramente "não enviei".
+ *
+ * É a diferença entre poder reenviar com segurança e arriscar mandar a mesma
+ * mensagem duas vezes: aqui a recusa é da própria Meta, então nada chegou ao
+ * cliente. Rede caindo, tempo esgotado e erro interno da Meta NÃO entram —
+ * nesses a mensagem pode ter passado.
+ */
+const UNAMBIGUOUS_REJECTION_CODES = new Set([
+  ...TOKEN_CODES,
+  ...PERMISSION_CODES,
+  ...RATE_LIMIT_CODES,
+  // Janela de 24h, número inválido, mídia recusada e erros de formato/parâmetro.
+  "131047",
+  "131051",
+  "131026",
+  "131052",
+  "131053",
+  "100",
+  "131008",
+  "131009",
+  "131021",
+  "132000",
+  "132001",
+  "132005",
+  "132007",
+  "132012",
+  "132015",
+  "133010",
+  "368",
+]);
+
+export function isUnambiguousRejection(code: string | null): boolean {
+  if (!code) return false;
+  return UNAMBIGUOUS_REJECTION_CODES.has(code);
 }

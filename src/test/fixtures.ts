@@ -51,9 +51,12 @@ export function mensagemFake(overrides: Partial<ThreadMessage> = {}): ThreadMess
     media_filename: null,
     status: "delivered",
     error_message: null,
+    error_code: null,
+    provider_message_id: null,
     sent_by_user_id: null,
     wa_timestamp: "2026-01-01T10:00:00.000Z",
     created_at: "2026-01-01T10:00:00.000Z",
+    updated_at: "2026-01-01T10:00:00.000Z",
     ...overrides,
   } as ThreadMessage;
 }
